@@ -50,7 +50,10 @@ RANKING_WEIGHTS: dict[str, float] = {
 # ── Database ──────────────────────────────────────────────────────────────────
 DATA_DIR: Path = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
-DATABASE_URL: str = f"sqlite:///{DATA_DIR}/research.db"
+# Override via DATABASE_URL env var for hosted deployments (e.g. Turso/LibSQL)
+DATABASE_URL: str = os.getenv(
+    "DATABASE_URL", f"sqlite:///{DATA_DIR}/research.db"
+)
 
 # ── Cache TTLs (seconds) ──────────────────────────────────────────────────────
 # Wallet is considered fresh for 24 h; re-scanned in incremental mode if older
