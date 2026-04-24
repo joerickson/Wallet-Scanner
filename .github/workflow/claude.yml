@@ -1,0 +1,68 @@
+name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    # Only run when @claude is mentioned OR when an issue is assigned to claude
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # v1 syntax — all CLI options pass through claude_args
+          # Using Opus 4.6 due to open bug in v1 action with Opus 4.7's new thinking API
+          # Ref: github.com/anthropics/claude-code-action/issues/1225
+          claude_args: "--model claude-opus-4-6 --max-turns 150"
+          # Expose Supabase secrets AND Claude Code internal timeout overrides
+          env: |
+            SUPABASE_ACCESS_TOKEN=${{ secrets.SUPABASE_ACCESS_TOKEN }}
+            SUPABASE_PROJECT_REF=${{ secrets.SUPABASE_PROJECT_REF }}
+            SUPABASE_DB_PASSWORD=${{ secrets.SUPABASE_DB_PASSWORD }}
+            NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+            API_TIMEOUT_MS=1800000
+            CLAUDE_STREAM_IDLE_TIMEOUT_MS=1800000
+            BASH_DEFAULT_TIMEOUT_MS=600000
+            BASH_MAX_TIMEOUT_MS=1800000
+            MCP_TIMEOUT=120000
