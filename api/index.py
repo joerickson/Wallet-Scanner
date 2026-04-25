@@ -1,21 +1,14 @@
 from __future__ import annotations
 
 import json
-import os
-import secrets
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from data.database import init_db
 from scanner import repository as repo
 
 app = FastAPI(title="Wallet Scanner", docs_url=None, redoc_url=None)
-
-_security = HTTPBasic()
-_DASHBOARD_USER = os.getenv("DASHBOARD_USER", "")
-_DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "")
 
 # Initialize DB tables on cold start (no-op if DB is unavailable)
 try:
@@ -24,22 +17,13 @@ except Exception:
     pass
 
 
-def _auth(creds: HTTPBasicCredentials = Depends(_security)) -> None:
-    if not _DASHBOARD_USER or not _DASHBOARD_PASS:
-        return
-    ok = secrets.compare_digest(creds.username.encode(), _DASHBOARD_USER.encode()) and \
-         secrets.compare_digest(creds.password.encode(), _DASHBOARD_PASS.encode())
-    if not ok:
-        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
-
-
 @app.get("/", response_class=HTMLResponse)
-def root(_: None = Depends(_auth)) -> str:
+def root() -> str:
     return "<meta http-equiv='refresh' content='0; url=/api/leaderboard'>"
 
 
 @app.get("/api/leaderboard")
-def leaderboard(limit: int = 50, _: None = Depends(_auth)) -> list[dict]:
+def leaderboard(limit: int = 50) -> list[dict]:
     rows = repo.get_top_rankings(limit=min(limit, 200))
     result = []
     for r in rows:
@@ -72,7 +56,7 @@ def leaderboard(limit: int = 50, _: None = Depends(_auth)) -> list[dict]:
 
 
 @app.get("/api/alerts")
-def alerts(limit: int = 50, _: None = Depends(_auth)) -> list[dict]:
+def alerts(limit: int = 50) -> list[dict]:
     rows = repo.get_recent_alerts(limit=min(limit, 100))
     return [
         {
@@ -91,7 +75,7 @@ def alerts(limit: int = 50, _: None = Depends(_auth)) -> list[dict]:
 
 
 @app.get("/api/wallets/{address}")
-def wallet_detail(address: str, _: None = Depends(_auth)) -> dict:
+def wallet_detail(address: str) -> dict:
     ranking = repo.get_ranking_for_wallet(address)
     metrics = repo.get_metrics_for_wallet(address)
     if ranking is None and metrics is None:
