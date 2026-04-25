@@ -49,8 +49,11 @@ RANKING_WEIGHTS: dict[str, float] = {
 
 # ── Database ──────────────────────────────────────────────────────────────────
 DATA_DIR: Path = Path(__file__).parent / "data"
-DATA_DIR.mkdir(exist_ok=True)
-DATABASE_URL: str = f"sqlite:///{DATA_DIR}/research.db"
+try:
+    DATA_DIR.mkdir(exist_ok=True)
+except OSError:
+    pass  # read-only filesystem (e.g. Vercel) — DATABASE_URL env var must be set
+DATABASE_URL: str = os.getenv("DATABASE_URL", f"sqlite:///{DATA_DIR}/research.db")
 
 # ── Cache TTLs (seconds) ──────────────────────────────────────────────────────
 # Wallet is considered fresh for 24 h; re-scanned in incremental mode if older
