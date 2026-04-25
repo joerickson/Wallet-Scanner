@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def _session() -> Session:
-    return Session(get_engine())
+    return Session(get_engine(), expire_on_commit=False)
 
 
 # ── Wallet ─────────────────────────────────────────────────────────────────────
