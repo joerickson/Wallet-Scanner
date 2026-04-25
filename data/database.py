@@ -35,5 +35,5 @@ def get_engine():
 
 
 def get_session() -> Generator[Session, None, None]:
-    with Session(_engine) as session:
+    with Session(_engine, expire_on_commit=False) as session:
         yield session
