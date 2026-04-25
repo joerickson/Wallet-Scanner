@@ -57,7 +57,7 @@ scanner/scanner.py  ← async gather with Semaphore(50) concurrency cap
        └─ claude_review (top 200 only) → skill_signal, edge_hypothesis, notes
               │
               ▼
-         SQLite research.db
+  SQLite (local) or Neon Postgres (hosted)
               │
        ┌──────┴──────────────────────────┐
        ▼                                 ▼
@@ -164,6 +164,7 @@ All settings live in `.env` (see `.env.example`):
 | Variable | Default | Notes |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | *(required)* | Anthropic API key |
+| `DATABASE_URL` | *(optional)* | Neon Postgres connection string; omit to use local SQLite |
 | `POLYMARKET_DATA_API_BASE` | `https://data-api.polymarket.com` | Override for testing |
 | `API_RATE_LIMIT` | `2.0` | Requests/second cap |
 | `MIN_TRADES` | `100` | Hard filter — minimum lifetime trades |
@@ -255,8 +256,8 @@ Filtering this down to the top ~50 wallets with consistent, risk-adjusted skill 
 ## Automated scans
 
 The repository includes a GitHub Actions workflow (`.github/workflows/scheduled-scan.yml`) that
-runs the wallet scanner automatically every **Monday at 06:00 UTC** and writes results to Turso,
-so the leaderboard stays fresh without needing to open Codespaces.
+runs the wallet scanner automatically every **Monday at 06:00 UTC** and writes results to Neon
+Postgres, so the leaderboard stays fresh without needing to open Codespaces.
 
 ### Changing the schedule
 
@@ -288,10 +289,13 @@ Add these under **Settings → Secrets and variables → Actions → New reposit
 | Secret | What it is |
 |---|---|
 | `ANTHROPIC_API_KEY` | Your Anthropic API key (`sk-ant-...`) |
-| `TURSO_DATABASE_URL` | Your Turso database URL (`libsql://yourdb.turso.io`) |
-| `TURSO_AUTH_TOKEN` | Turso auth token for the database |
+| `DATABASE_URL` | Your Neon Postgres connection string (`postgresql://user:pass@host/db?sslmode=require`) |
 
-To create a Turso database: `turso db create wallet-scanner` then `turso db show wallet-scanner`.
+To set up Neon Postgres:
+1. Sign up at [neon.tech](https://neon.tech)
+2. Create a new project and database
+3. Copy the connection string from the dashboard
+4. Add it as `DATABASE_URL` in Vercel environment variables, GitHub Secrets, and your local `.env`
 
 ### Cost expectations
 

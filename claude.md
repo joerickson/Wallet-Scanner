@@ -35,7 +35,7 @@ If hosting on Vercel, the dashboard layer can be a thin FastAPI or Flask app, OR
 - **anthropic** SDK — model `claude-sonnet-4-20250514` for scanner qualitative review, `claude-opus-4-7` only for periodic deep analysis
 - **httpx** (async) for all HTTP — never `requests`
 - **tenacity** for retries with exponential backoff
-- **sqlmodel** for SQLite ORM
+- **sqlmodel** + **sqlalchemy** for ORM; **psycopg[binary]** for Postgres driver
 - **pandas / numpy** for stats
 - **python-dotenv** for config
 - **pytest** + **pytest-asyncio** for tests
@@ -48,7 +48,7 @@ If hosting on Vercel, the dashboard layer can be a thin FastAPI or Flask app, OR
 - **Next.js + Tailwind** if the owner wants a polished mobile-friendly web view, OR plain Jinja2 templates served from FastAPI for a simpler stack
 - Authentication is optional and is the owner's call
 
-Do not add Postgres unless the dataset outgrows SQLite (very unlikely for single-user). Do not add Docker unless the owner asks. Do not add Redis or a job queue — async Python with `asyncio.create_task` is sufficient at this scale.
+Use Postgres (via `DATABASE_URL`) for hosted deployments (Vercel, GitHub Actions). SQLite remains the default for local CLI development. The libSQL/Turso path was abandoned due to driver compatibility issues with SQLAlchemy (`sqlite3.Connection has no create_function attribute`). Do not add Docker unless the owner asks. Do not add Redis or a job queue — async Python with `asyncio.create_task` is sufficient at this scale.
 
 ## Folder structure (canonical)
 
@@ -98,7 +98,9 @@ When adding new functionality, prefer extending an existing module over creating
 - Migrations append-only — add columns, never drop
 - Use transactions for multi-row writes
 - All DB writes go through `repository.py` modules — no inline SQL in business logic
-- If hosted dashboard needs DB access, it reads from the same SQLite file (or Turso/LibSQL if deployed); never duplicates state
+- Local development uses SQLite at `data/research.db` (no env var needed)
+- Hosted deployments use Neon Postgres — set `DATABASE_URL=postgresql://...` in env
+- If hosted dashboard needs DB access, it connects via the same `DATABASE_URL`; never duplicates state
 
 ### Claude API usage
 - Always use the official `anthropic` SDK
@@ -160,9 +162,8 @@ Weekly scans run automatically via `.github/workflows/scheduled-scan.yml` (every
 python main.py scan --incremental
 ```
 
-with `ANTHROPIC_API_KEY`, `TURSO_DATABASE_URL`, and `TURSO_AUTH_TOKEN` injected as GitHub
-secrets. Results are written to a Turso database (libsql embedded replica) and pushed at the
-end of each scan.
+with `ANTHROPIC_API_KEY` and `DATABASE_URL` injected as GitHub secrets. Results are written
+directly to Neon Postgres via the standard SQLAlchemy engine in `data/database.py`.
 
 **Rules that must be preserved in any future scanner changes:**
 
@@ -172,12 +173,7 @@ end of each scan.
    - Still re-ranks all wallets and writes the full leaderboard on every run
    - On first run with an empty DB, falls back to full wallet discovery automatically
 
-2. **The Turso write path must stay intact.** When `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`
-   are set, the database layer uses a libsql embedded replica (`data/turso_replica.db`) that
-   syncs to Turso at the end of each scan via `sync_to_turso()` in `data/database.py`.
-   Do not remove or bypass this call in `scanner/scanner.py`.
-
-3. **Cost discipline on the scheduled path.** The `--incremental` flag is what keeps the
+2. **Cost discipline on the scheduled path.** The `--incremental` flag is what keeps the
    scheduled run from calling Claude on the full top-200 list every week. If you change the
    Claude review logic, ensure freshness skipping still works.
 

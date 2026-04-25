@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta
 
 from config import CLAUDE_REVIEW_TOP_N, setup_logging
-from data.database import init_db, sync_to_turso
+from data.database import init_db
 from data.schema import WalletMetrics, WalletRanking
 from scanner import repository as repo
 from scanner.client import PolymarketClient
@@ -123,9 +123,6 @@ async def run_scan(
             if top_n:
                 logger.info("Sending top %d wallets for Claude review", len(top_n))
                 await _claude_review_pass(top_n, metrics_by_addr)
-
-        # ── Step 7: Sync to Turso ─────────────────────────────────────────────
-        sync_to_turso()
 
         logger.info("Scan complete — %d wallets ranked", len(rankings))
         return rankings

@@ -53,12 +53,13 @@ try:
     DATA_DIR.mkdir(exist_ok=True)
 except OSError:
     pass  # read-only filesystem (e.g. Vercel) — DATABASE_URL env var must be set
-DATABASE_URL: str = os.getenv("DATABASE_URL", f"sqlite:///{DATA_DIR}/research.db")
 
-# ── Turso (optional — replaces local SQLite when running in CI/cloud) ─────────
-# Set both to use Turso instead of SQLite. Leave blank for local development.
-TURSO_DATABASE_URL: str = os.getenv("TURSO_DATABASE_URL", "")
-TURSO_AUTH_TOKEN: str = os.getenv("TURSO_AUTH_TOKEN", "")
+_db_url_env: str = os.getenv("DATABASE_URL", "")
+if _db_url_env and (_db_url_env.startswith("postgresql://") or _db_url_env.startswith("postgres://")):
+    DATABASE_URL: str = _db_url_env
+else:
+    # Default: local SQLite for CLI development
+    DATABASE_URL = f"sqlite:///{DATA_DIR}/research.db"
 
 # ── Cache TTLs (seconds) ──────────────────────────────────────────────────────
 # Wallet is considered fresh for 24 h; re-scanned in incremental mode if older
