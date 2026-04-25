@@ -151,6 +151,36 @@ When adding new functionality, prefer extending an existing module over creating
 - textual: https://textual.textualize.io/
 - FastAPI: https://fastapi.tiangolo.com/
 
+## Scheduled scans
+
+Weekly scans run automatically via `.github/workflows/scheduled-scan.yml` (every Monday at
+06:00 UTC, plus on-demand via `workflow_dispatch`). The workflow runs:
+
+```bash
+python main.py scan --incremental
+```
+
+with `ANTHROPIC_API_KEY`, `TURSO_DATABASE_URL`, and `TURSO_AUTH_TOKEN` injected as GitHub
+secrets. Results are written to a Turso database (libsql embedded replica) and pushed at the
+end of each scan.
+
+**Rules that must be preserved in any future scanner changes:**
+
+1. **`--incremental` flag must always be accepted by `python main.py scan`.**
+   - Skips wallets refreshed in the last 24 hours (controlled by `WALLET_CACHE_TTL`)
+   - Skips Claude qualitative review for wallets reviewed in the last 7 days
+   - Still re-ranks all wallets and writes the full leaderboard on every run
+   - On first run with an empty DB, falls back to full wallet discovery automatically
+
+2. **The Turso write path must stay intact.** When `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`
+   are set, the database layer uses a libsql embedded replica (`data/turso_replica.db`) that
+   syncs to Turso at the end of each scan via `sync_to_turso()` in `data/database.py`.
+   Do not remove or bypass this call in `scanner/scanner.py`.
+
+3. **Cost discipline on the scheduled path.** The `--incremental` flag is what keeps the
+   scheduled run from calling Claude on the full top-200 list every week. If you change the
+   Claude review logic, ensure freshness skipping still works.
+
 ## When in doubt
 
-Ask the owner. Scope discipline matters, but the owner decides what's in scope. When the owner makes a call that contradicts a previous instruction here, follow the owner — and update this file accordingly.board, hosted alerts) is a feature, not a violation.
+Ask the owner. Scope discipline matters, but the owner decides what's in scope. When the owner makes a call that contradicts a previous instruction here, follow the owner — and update this file accordingly.
