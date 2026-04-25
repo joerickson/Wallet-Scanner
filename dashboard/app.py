@@ -110,7 +110,7 @@ class WalletScannerApp(App):
     def _setup_leaderboard(self) -> None:
         table = self.query_one("#leaderboard", DataTable)
         table.add_columns(
-            "Rank", "Address", "Score", "Win%", "Sharpe", "P&L", "Flags"
+            "Rank", "Address", "Score", "P&L", "Positions", "Resolved", "Flags"
         )
 
     def _populate_leaderboard(self) -> None:
@@ -122,15 +122,11 @@ class WalletScannerApp(App):
             metrics = repo.get_metrics_for_wallet(r.wallet_address)
             addr_short = f"{r.wallet_address[:6]}…{r.wallet_address[-4:]}"
 
-            win_pct = (
-                f"{metrics.win_rate:.0%}" if metrics and metrics.win_rate is not None else "–"
-            )
-            sharpe = (
-                f"{metrics.sharpe_ratio:.2f}" if metrics and metrics.sharpe_ratio is not None else "–"
-            )
             pnl = (
                 f"${metrics.total_pnl:,.0f}" if metrics and metrics.total_pnl is not None else "–"
             )
+            positions = str(metrics.trade_count) if metrics else "–"
+            resolved = str(metrics.realized_position_count) if metrics else "–"
 
             flags = []
             if r.heuristic_red_flags:
@@ -149,9 +145,9 @@ class WalletScannerApp(App):
                 str(r.rank),
                 addr_short,
                 f"{r.composite_score:.4f}",
-                win_pct,
-                sharpe,
                 pnl,
+                positions,
+                resolved,
                 flag_str,
                 key=r.wallet_address,
             )
@@ -220,14 +216,14 @@ class WalletScannerApp(App):
 
         if metrics:
             log.write("[bold underline]Metrics[/bold underline]")
-            log.write(f"Trades:      {metrics.trade_count}")
-            log.write(f"Win rate:    {metrics.win_rate:.1%}" if metrics.win_rate is not None else "Win rate:    –")
+            log.write(f"Positions:   {metrics.trade_count}")
+            log.write(f"Resolved:    {metrics.realized_position_count}")
+            log.write(f"Unresolved:  {metrics.unresolved_position_count}")
             log.write(f"Total P&L:   ${metrics.total_pnl:,.2f}" if metrics.total_pnl is not None else "Total P&L:   –")
             log.write(f"Volume:      ${metrics.total_volume:,.2f}" if metrics.total_volume is not None else "Volume:      –")
-            log.write(f"Sharpe:      {metrics.sharpe_ratio:.3f}" if metrics.sharpe_ratio is not None else "Sharpe:      –")
-            log.write(f"Prof factor: {metrics.profit_factor:.3f}" if metrics.profit_factor is not None else "Prof factor: –")
+            log.write(f"Portfolio:   ${metrics.portfolio_value:,.2f}" if metrics.portfolio_value is not None else "Portfolio:   –")
             log.write(f"Markets:     {metrics.market_count}")
-            log.write(f"Avg hold:    {metrics.avg_hold_time_hours:.1f}h" if metrics.avg_hold_time_hours is not None else "Avg hold:    –")
+            log.write(f"Top 3 P&L:   {metrics.pct_pnl_from_top_3_positions:.1%}" if metrics.pct_pnl_from_top_3_positions is not None else "Top 3 P&L:   –")
 
         if ranking:
             log.write("")

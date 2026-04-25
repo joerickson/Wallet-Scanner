@@ -6,9 +6,8 @@ from typing import Any
 
 import anthropic
 
-from analysis.patterns import extract_patterns, patterns_to_dict
 from config import ANTHROPIC_API_KEY, CLAUDE_MAX_TOKENS, CLAUDE_SCANNER_MODEL
-from data.schema import WalletMetrics
+from data.schema import Position, WalletMetrics
 from scanner import repository as repo
 
 logger = logging.getLogger(__name__)
@@ -38,42 +37,46 @@ Respond ONLY with valid JSON matching this exact schema — no prose, no markdow
 }
 
 skill_signal: 0.0 = pure luck/artefact, 1.0 = strong evidence of repeatable skill.
-red_flags: empty list if none. Possible flags: "insider_timing", "market_manipulation",
-  "single_event_luck", "data_artefact", "recency_cliff", "market_concentration",
-  "survivorship_bias", "volume_size_mismatch".
+red_flags: empty list if none. Possible flags: "single_event_luck", "data_artefact",
+  "recency_cliff", "market_concentration", "survivorship", "single_bet_dominance".
 """
 
 
 def _build_prompt(
     address: str,
     metrics: WalletMetrics,
-    patterns: dict[str, Any],
+    top_positions: list[Position],
     heuristic_flags: list[str],
+    leaderboard_rank: int | None,
 ) -> str:
-    m = metrics
     lines = [
         f"Wallet: {address}",
-        "",
-        "## Quantitative Metrics",
-        f"- Trade count: {m.trade_count}",
-        f"- Win rate: {m.win_rate:.1%}" if m.win_rate is not None else "- Win rate: N/A",
-        f"- Total P&L: ${m.total_pnl:,.2f}" if m.total_pnl is not None else "- Total P&L: N/A",
-        f"- Total volume: ${m.total_volume:,.2f}" if m.total_volume is not None else "- Total volume: N/A",
-        f"- Sharpe ratio: {m.sharpe_ratio:.3f}" if m.sharpe_ratio is not None else "- Sharpe ratio: N/A (insufficient trades)",
-        f"- Profit factor: {m.profit_factor:.3f}" if m.profit_factor is not None else "- Profit factor: N/A",
-        f"- Market count: {m.market_count}",
-        f"- Top market concentration: {m.top_market_concentration:.1%}" if m.top_market_concentration is not None else "- Top market concentration: N/A",
-        f"- Exit quality: {m.exit_quality:.3f}" if m.exit_quality is not None else "- Exit quality: N/A",
-        "",
-        "## Behaviour Patterns",
     ]
-    for k, v in patterns.items():
-        if v is not None:
-            lines.append(f"- {k}: {v}")
+    if leaderboard_rank:
+        lines.append(f"Leaderboard rank: #{leaderboard_rank}")
+    lines += [
+        "",
+        "## Summary Metrics",
+        f"- Total P&L: ${metrics.total_pnl:,.2f}" if metrics.total_pnl is not None else "- Total P&L: N/A",
+        f"- Total volume: ${metrics.total_volume:,.2f}" if metrics.total_volume is not None else "- Total volume: N/A",
+        f"- Portfolio value: ${metrics.portfolio_value:,.2f}" if metrics.portfolio_value is not None else "- Portfolio value: N/A",
+        f"- Positions traded: {metrics.trade_count} ({metrics.realized_position_count} resolved, {metrics.unresolved_position_count} unresolved)",
+        f"- Markets: {metrics.market_count}",
+        f"- Top market concentration: {metrics.top_market_concentration:.1%}" if metrics.top_market_concentration is not None else "- Top market concentration: N/A",
+        f"- P&L from top 3 positions: {metrics.pct_pnl_from_top_3_positions:.1%}" if metrics.pct_pnl_from_top_3_positions is not None else "- P&L from top 3 positions: N/A",
+    ]
+
+    if top_positions:
+        lines += ["", "## Top 5 Positions by Absolute P&L"]
+        for i, pos in enumerate(top_positions[:5], start=1):
+            status = "RESOLVED ✓" if pos.redeemable else "unresolved"
+            pnl_str = f"${pos.cash_pnl:,.2f}" if pos.cash_pnl is not None else "N/A"
+            title = (pos.title or pos.condition_id)[:60]
+            outcome = pos.outcome or "?"
+            lines.append(f"{i}. \"{title}\" {outcome} — Cash P&L: {pnl_str} — {status}")
 
     if heuristic_flags:
-        lines.append("")
-        lines.append("## Heuristic Red Flags Already Detected")
+        lines += ["", "## Heuristic Red Flags Already Detected"]
         for flag in heuristic_flags:
             lines.append(f"- {flag}")
 
@@ -81,14 +84,20 @@ def _build_prompt(
 
 
 async def review_wallet(
-    address: str, metrics: WalletMetrics
+    address: str,
+    metrics: WalletMetrics,
+    leaderboard_rank: int | None = None,
 ) -> dict[str, Any] | None:
     """
-    Send one wallet's metrics + patterns to Claude for qualitative review.
+    Send one wallet's metrics + top positions to Claude for qualitative review.
     Returns parsed JSON dict or None if the call fails or produces invalid JSON.
     """
-    trades = repo.get_trades_for_wallet(address)
-    patterns = patterns_to_dict(extract_patterns(trades) or _empty_patterns(address))
+    positions = repo.get_positions_for_wallet(address)
+    top_positions = sorted(
+        [p for p in positions if p.cash_pnl is not None],
+        key=lambda p: abs(p.cash_pnl),  # type: ignore[arg-type]
+        reverse=True,
+    )[:5]
 
     ranking = repo.get_ranking_for_wallet(address)
     heuristic_flags: list[str] = []
@@ -98,7 +107,7 @@ async def review_wallet(
         except json.JSONDecodeError:
             pass
 
-    prompt = _build_prompt(address, metrics, patterns, heuristic_flags)
+    prompt = _build_prompt(address, metrics, top_positions, heuristic_flags, leaderboard_rank)
 
     try:
         client = _get_client()
@@ -117,7 +126,6 @@ async def review_wallet(
 
 def _parse_response(raw: str, address: str) -> dict[str, Any] | None:
     """Parse and validate the Claude JSON response. Logs and returns None on failure."""
-    # Strip common LLM noise like triple-backtick fences
     text = raw.strip()
     if text.startswith("```"):
         text = text.split("```")[1]
@@ -128,10 +136,12 @@ def _parse_response(raw: str, address: str) -> dict[str, Any] | None:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
-        logger.warning("JSON parse failed for Claude response on %s: %s\nRaw: %s", address, exc, raw[:300])
+        logger.warning(
+            "JSON parse failed for Claude response on %s: %s\nRaw: %s",
+            address, exc, raw[:300],
+        )
         return None
 
-    # Validate required fields
     skill = data.get("skill_signal")
     if not isinstance(skill, (int, float)) or not (0.0 <= float(skill) <= 1.0):
         logger.warning("Invalid skill_signal in Claude response for %s", address)
@@ -146,8 +156,3 @@ def _parse_response(raw: str, address: str) -> dict[str, Any] | None:
         "red_flags": [str(f) for f in data.get("red_flags", [])],
         "notes": str(data.get("notes") or ""),
     }
-
-
-def _empty_patterns(address: str) -> Any:
-    from analysis.patterns import WalletPatterns
-    return WalletPatterns(wallet_address=address)

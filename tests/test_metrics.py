@@ -1,153 +1,149 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pytest
 
-from data.schema import Trade
+from data.schema import Position
 from scanner.metrics import (
     apply_hard_filters,
     compute_metrics,
-    parse_trades,
+    parse_positions,
 )
 
 
-# ── parse_trades ──────────────────────────────────────────────────────────────
+# ── parse_positions ───────────────────────────────────────────────────────────
 
-class TestParseTrades:
+class TestParsePositions:
     def test_parses_standard_record(self):
         raw = [
             {
-                "type": "TRADE",
-                "market": "0xmarket1",
-                "side": "BUY",
+                "conditionId": "0xcondition1",
+                "asset": "0xasset1",
+                "title": "Will X happen?",
+                "slug": "will-x-happen",
                 "outcome": "Yes",
-                "usdcSize": 100.0,
-                "price": 0.65,
-                "pnl": 53.85,
-                "resolved": True,
-                "resolutionPrice": 1.0,
-                "timestamp": "2024-01-01T00:00:00Z",
-                "title": "Test market",
+                "avgPrice": 0.65,
+                "size": 100.0,
+                "initialValue": 100.0,
+                "currentValue": 150.0,
+                "cashPnl": 50.0,
+                "percentPnl": 0.50,
+                "totalBought": 100.0,
+                "realizedPnl": 50.0,
+                "percentRealizedPnl": 0.50,
+                "curPrice": 1.0,
+                "redeemable": True,
+                "endDate": "2024-06-01T00:00:00Z",
             }
         ]
-        trades = parse_trades("0xwallet", raw)
-        assert len(trades) == 1
-        t = trades[0]
-        assert t.wallet_address == "0xwallet"
-        assert t.market_id == "0xmarket1"
-        assert t.side == "BUY"
-        assert t.size == 100.0
-        assert t.price == 0.65
-        assert t.pnl == pytest.approx(53.85)
-        assert t.is_resolved is True
+        positions = parse_positions("0xwallet", raw)
+        assert len(positions) == 1
+        p = positions[0]
+        assert p.wallet_address == "0xwallet"
+        assert p.condition_id == "0xcondition1"
+        assert p.outcome == "Yes"
+        assert p.size == pytest.approx(100.0)
+        assert p.avg_price == pytest.approx(0.65)
+        assert p.cash_pnl == pytest.approx(50.0)
+        assert p.redeemable is True
 
-    def test_skips_records_without_timestamp(self):
-        raw = [{"type": "TRADE", "market": "0xm", "side": "BUY", "usdcSize": 100}]
-        trades = parse_trades("0xwallet", raw)
-        assert len(trades) == 0
-
-    def test_skips_records_without_market(self):
-        raw = [{"type": "TRADE", "side": "BUY", "usdcSize": 100, "timestamp": "2024-01-01T00:00:00Z"}]
-        trades = parse_trades("0xwallet", raw)
-        assert len(trades) == 0
-
-    def test_skips_non_trade_types(self):
-        raw = [
-            {"type": "MERGE", "market": "0xm", "usdcSize": 100, "timestamp": "2024-01-01T00:00:00Z"},
-            {"type": "SPLIT", "market": "0xm", "usdcSize": 100, "timestamp": "2024-01-01T00:00:00Z"},
-        ]
-        trades = parse_trades("0xwallet", raw)
-        assert len(trades) == 0
-
-    def test_parses_unix_timestamp(self):
-        raw = [{"type": "TRADE", "market": "0xm", "side": "BUY", "usdcSize": 50, "timestamp": 1704067200}]
-        trades = parse_trades("0xwallet", raw)
-        assert len(trades) == 1
-        assert trades[0].timestamp == datetime(2024, 1, 1, 0, 0, 0)
+    def test_skips_records_without_condition_id(self):
+        raw = [{"asset": "0xasset", "outcome": "Yes", "size": 100}]
+        positions = parse_positions("0xwallet", raw)
+        assert len(positions) == 0
 
     def test_handles_empty_list(self):
-        assert parse_trades("0xwallet", []) == []
+        assert parse_positions("0xwallet", []) == []
 
     def test_handles_malformed_records_gracefully(self):
         raw = [
-            {"type": "TRADE", "market": "0xm", "side": "BUY", "price": "not_a_float", "usdcSize": 100, "timestamp": 1704067200},
-            {"type": "TRADE", "market": "0xm2", "side": "BUY", "price": 0.5, "usdcSize": 100, "timestamp": 1704067200},
+            {"conditionId": "0xcond1", "size": "not_a_float"},
+            {"conditionId": "0xcond2", "size": 100.0},
         ]
-        # Should not crash; at least the valid record is parsed
-        trades = parse_trades("0xwallet", raw)
-        assert any(t.market_id == "0xm2" for t in trades)
+        positions = parse_positions("0xwallet", raw)
+        assert any(p.condition_id == "0xcond2" for p in positions)
+
+    def test_redeemable_defaults_to_false(self):
+        raw = [{"conditionId": "0xcond1"}]
+        positions = parse_positions("0xwallet", raw)
+        assert len(positions) == 1
+        assert positions[0].redeemable is False
+
+    def test_parses_snake_case_fields(self):
+        raw = [{"condition_id": "0xcond1", "avg_price": 0.5, "cash_pnl": 10.0}]
+        positions = parse_positions("0xwallet", raw)
+        assert len(positions) == 1
+        assert positions[0].condition_id == "0xcond1"
+        assert positions[0].avg_price == pytest.approx(0.5)
+        assert positions[0].cash_pnl == pytest.approx(10.0)
 
 
 # ── compute_metrics ───────────────────────────────────────────────────────────
 
 class TestComputeMetrics:
-    def test_returns_none_for_empty_trades(self):
-        assert compute_metrics([]) is None
+    def test_returns_none_for_empty_positions(self):
+        assert compute_metrics([], None, None, None) is None
 
-    def test_win_rate_computed_from_completed_trades(self, profitable_trades):
-        m = compute_metrics(profitable_trades)
+    def test_uses_leaderboard_pnl_and_vol(self, resolved_positions):
+        m = compute_metrics(resolved_positions, leaderboard_pnl=12345.0, leaderboard_vol=98765.0, portfolio_value=None)
         assert m is not None
-        assert m.win_rate is not None
-        # 60 wins / 120 trades with pnl — ~0.5 win rate in fixture (even/odd pattern)
-        assert 0.45 <= m.win_rate <= 0.75
+        assert m.total_pnl == pytest.approx(12345.0)
+        assert m.total_volume == pytest.approx(98765.0)
 
-    def test_sharpe_is_none_below_threshold(self, sparse_trades):
-        """Sharpe must be None when fewer than SHARPE_MIN_TRADES (90) exist."""
-        m = compute_metrics(sparse_trades)
+    def test_trade_count_equals_position_count(self, resolved_positions):
+        m = compute_metrics(resolved_positions, None, None, None)
         assert m is not None
-        assert m.sharpe_ratio is None, "CLAUDE.md rule 5: Sharpe must not be estimated from sparse data"
+        assert m.trade_count == len(resolved_positions)
 
-    def test_sharpe_is_computed_above_threshold(self, profitable_trades):
-        m = compute_metrics(profitable_trades)
+    def test_realized_count_from_redeemable(self, mixed_positions):
+        m = compute_metrics(mixed_positions, None, None, None)
         assert m is not None
-        # 120 trades with P&L — should compute Sharpe
-        assert m.sharpe_ratio is not None
+        resolved = sum(1 for p in mixed_positions if p.redeemable)
+        unresolved = sum(1 for p in mixed_positions if not p.redeemable)
+        assert m.realized_position_count == resolved
+        assert m.unresolved_position_count == unresolved
 
-    def test_profit_factor_is_positive(self, profitable_trades):
-        m = compute_metrics(profitable_trades)
-        assert m is not None
-        assert m.profit_factor is not None
-        assert m.profit_factor > 0
-
-    def test_profit_factor_none_when_no_losses(self, wallet_address):
-        trades = [
-            Trade(
-                wallet_address=wallet_address,
-                market_id=f"m{i}",
-                side="BUY",
-                size=100,
-                price=0.5,
-                pnl=50.0,
-                is_resolved=True,
-                timestamp=datetime.utcnow() + timedelta(hours=i),
-            )
-            for i in range(110)
-        ]
-        m = compute_metrics(trades)
-        # No losses → profit_factor cannot be computed (division by zero)
-        assert m.profit_factor is None
-
-    def test_total_volume_sums_all_trade_sizes(self, profitable_trades):
-        m = compute_metrics(profitable_trades)
-        assert m is not None
-        expected = sum(t.size for t in profitable_trades)
-        assert m.total_volume == pytest.approx(expected)
-
-    def test_market_count_counts_unique_markets(self, profitable_trades):
-        m = compute_metrics(profitable_trades)
+    def test_market_count_counts_unique_condition_ids(self, resolved_positions):
+        m = compute_metrics(resolved_positions, None, None, None)
         assert m is not None
         assert m.market_count == 10  # fixture has 10 distinct markets
 
-    def test_top_market_concentration(self, single_market_trades):
-        m = compute_metrics(single_market_trades)
+    def test_top_market_concentration_single_market(self, single_market_positions):
+        m = compute_metrics(single_market_positions, None, None, None)
         assert m is not None
-        assert m.top_market_concentration == pytest.approx(1.0)  # all in one market
+        assert m.top_market_concentration == pytest.approx(1.0)
 
-    def test_win_count_loss_count_consistent(self, profitable_trades):
-        m = compute_metrics(profitable_trades)
+    def test_portfolio_value_stored(self, resolved_positions):
+        m = compute_metrics(resolved_positions, None, None, portfolio_value=42000.0)
         assert m is not None
-        assert m.win_count + m.loss_count <= m.trade_count
+        assert m.portfolio_value == pytest.approx(42000.0)
+
+    def test_pct_pnl_top3_computed(self, concentrated_pnl_positions):
+        m = compute_metrics(concentrated_pnl_positions, None, None, None)
+        assert m is not None
+        assert m.pct_pnl_from_top_3_positions is not None
+        # The big winner dominates — fraction should be high
+        assert m.pct_pnl_from_top_3_positions > 0.7
+
+    def test_pct_pnl_top3_none_when_no_cash_pnl(self, wallet_address):
+        positions = [
+            Position(
+                wallet_address=wallet_address,
+                condition_id=f"m{i}",
+                cash_pnl=None,
+            )
+            for i in range(5)
+        ]
+        m = compute_metrics(positions, None, None, None)
+        assert m is not None
+        assert m.pct_pnl_from_top_3_positions is None
+
+    def test_avg_and_max_position_size(self, resolved_positions):
+        m = compute_metrics(resolved_positions, None, None, None)
+        assert m is not None
+        assert m.avg_position_size is not None
+        assert m.max_position_size_usd is not None
 
 
 # ── apply_hard_filters ────────────────────────────────────────────────────────
@@ -156,20 +152,26 @@ class TestApplyHardFilters:
     def test_passes_qualifying_wallet(self, basic_metrics):
         result = apply_hard_filters(
             [basic_metrics],
-            min_trades=100,
-            min_win_rate=0.60,
+            min_trades=30,
+            min_pnl=5000.0,
             min_volume=5000.0,
+            min_realized_positions=10,
         )
         assert len(result) == 1
 
-    def test_rejects_insufficient_trades(self, basic_metrics):
-        basic_metrics.trade_count = 50
-        result = apply_hard_filters([basic_metrics], min_trades=100)
+    def test_rejects_insufficient_positions(self, basic_metrics):
+        basic_metrics.trade_count = 10
+        result = apply_hard_filters([basic_metrics], min_trades=30)
         assert len(result) == 0
 
-    def test_rejects_low_win_rate(self, basic_metrics):
-        basic_metrics.win_rate = 0.45
-        result = apply_hard_filters([basic_metrics], min_win_rate=0.60)
+    def test_rejects_low_pnl(self, basic_metrics):
+        basic_metrics.total_pnl = 100.0
+        result = apply_hard_filters([basic_metrics], min_pnl=5000.0)
+        assert len(result) == 0
+
+    def test_rejects_none_pnl(self, basic_metrics):
+        basic_metrics.total_pnl = None
+        result = apply_hard_filters([basic_metrics])
         assert len(result) == 0
 
     def test_rejects_low_volume(self, basic_metrics):
@@ -177,9 +179,9 @@ class TestApplyHardFilters:
         result = apply_hard_filters([basic_metrics], min_volume=5000.0)
         assert len(result) == 0
 
-    def test_rejects_none_win_rate(self, basic_metrics):
-        basic_metrics.win_rate = None
-        result = apply_hard_filters([basic_metrics])
+    def test_rejects_too_few_realized_positions(self, basic_metrics):
+        basic_metrics.realized_position_count = 5
+        result = apply_hard_filters([basic_metrics], min_realized_positions=10)
         assert len(result) == 0
 
     def test_empty_list_returns_empty(self):
@@ -190,9 +192,10 @@ class TestApplyHardFilters:
 
         poor = WalletMetrics(
             wallet_address="0xpoor",
-            trade_count=50,
-            win_rate=0.40,
+            trade_count=10,
+            total_pnl=50.0,
             total_volume=1000.0,
+            realized_position_count=3,
             computed_at=datetime.utcnow(),
         )
         result = apply_hard_filters([basic_metrics, poor])

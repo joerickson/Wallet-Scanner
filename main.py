@@ -19,7 +19,7 @@ console = Console()
 # ── CLI root ──────────────────────────────────────────────────────────────────
 
 @click.group()
-@click.version_option("0.1.0", prog_name="wallet-scanner")
+@click.version_option("0.2.0", prog_name="wallet-scanner")
 def cli() -> None:
     """Polymarket wallet research tool — read-only, no trading, no keys."""
     setup_logging()
@@ -45,8 +45,9 @@ def cli() -> None:
 def scan(incremental: bool, max_wallets: int) -> None:
     """Full wallet discovery + scoring pass.
 
-    Fetches wallet list from Polymarket, computes metrics, ranks wallets,
-    runs Claude qualitative review on top 200, and saves results to SQLite.
+    Sweeps the Polymarket leaderboard, fetches positions per wallet,
+    computes metrics, ranks wallets, runs Claude qualitative review on
+    top 200, and saves results to the database.
     """
     from scanner.scanner import run_scan
 
@@ -104,12 +105,11 @@ def leaderboard(top: int, export_fmt: str | None, output: str | None) -> None:
             "rank": r.rank,
             "address": r.wallet_address,
             "composite_score": round(r.composite_score, 4),
-            "win_rate": round(m.win_rate, 4) if m and m.win_rate is not None else None,
             "total_pnl": round(m.total_pnl, 2) if m and m.total_pnl is not None else None,
             "total_volume": round(m.total_volume, 2) if m and m.total_volume is not None else None,
-            "trade_count": m.trade_count if m else None,
-            "sharpe": round(m.sharpe_ratio, 3) if m and m.sharpe_ratio is not None else None,
-            "profit_factor": round(m.profit_factor, 3) if m and m.profit_factor is not None else None,
+            "portfolio_value": round(m.portfolio_value, 2) if m and m.portfolio_value is not None else None,
+            "positions": m.trade_count if m else None,
+            "realized": m.realized_position_count if m else None,
             "skill_signal": round(r.skill_signal, 2) if r.skill_signal is not None else None,
             "edge_hypothesis": r.edge_hypothesis or "",
             "red_flags": flags,
@@ -143,18 +143,21 @@ def leaderboard(top: int, export_fmt: str | None, output: str | None) -> None:
     table.add_column("Rank", justify="right", style="dim", width=5)
     table.add_column("Address", style="cyan", no_wrap=True)
     table.add_column("Score", justify="right")
-    table.add_column("Win%", justify="right")
-    table.add_column("Sharpe", justify="right")
     table.add_column("P&L", justify="right")
-    table.add_column("Trades", justify="right")
+    table.add_column("Volume", justify="right")
+    table.add_column("Portfolio", justify="right")
+    table.add_column("Positions", justify="right")
+    table.add_column("Resolved", justify="right")
     table.add_column("Skill", justify="right")
     table.add_column("Flags")
 
     for r in rows:
         addr = f"{r['address'][:8]}…{r['address'][-6:]}"
-        win_pct = f"{r['win_rate']:.0%}" if r["win_rate"] is not None else "–"
-        sharpe = f"{r['sharpe']:.2f}" if r["sharpe"] is not None else "–"
         pnl = f"${r['total_pnl']:,.0f}" if r["total_pnl"] is not None else "–"
+        vol = f"${r['total_volume']:,.0f}" if r["total_volume"] is not None else "–"
+        portfolio = f"${r['portfolio_value']:,.0f}" if r["portfolio_value"] is not None else "–"
+        positions = str(r["positions"]) if r["positions"] is not None else "–"
+        realized = str(r["realized"]) if r["realized"] is not None else "–"
         skill = f"{r['skill_signal']:.2f}" if r["skill_signal"] is not None else "–"
         flags_str = " ".join(f"[red]⚑{f}[/red]" for f in r["red_flags"]) if r["red_flags"] else "[green]✓[/green]"
 
@@ -162,10 +165,11 @@ def leaderboard(top: int, export_fmt: str | None, output: str | None) -> None:
             str(r["rank"]),
             addr,
             str(r["composite_score"]),
-            win_pct,
-            sharpe,
             pnl,
-            str(r["trade_count"] or "–"),
+            vol,
+            portfolio,
+            positions,
+            realized,
             skill,
             flags_str,
         )
@@ -178,13 +182,16 @@ def leaderboard(top: int, export_fmt: str | None, output: str | None) -> None:
 @cli.command()
 @click.argument("address")
 def wallet(address: str) -> None:
-    """Deep-dive on a single wallet address."""
+    """Deep-dive on a single wallet address.
+
+    Shows leaderboard rank, total P&L, top 10 positions, red flags, and Claude review.
+    """
     from scanner import repository as repo
 
     address = address.lower()
     m = repo.get_metrics_for_wallet(address)
     r = repo.get_ranking_for_wallet(address)
-    trades = repo.get_trades_for_wallet(address)
+    positions = repo.get_positions_for_wallet(address)
 
     if not m and not r:
         console.print(f"[yellow]No data for {address}. Run a scan first.[/yellow]")
@@ -197,15 +204,16 @@ def wallet(address: str) -> None:
         metrics_table.add_column(style="dim")
         metrics_table.add_column()
         pairs = [
-            ("Trade count", str(m.trade_count)),
-            ("Win rate", f"{m.win_rate:.1%}" if m.win_rate is not None else "–"),
             ("Total P&L", f"${m.total_pnl:,.2f}" if m.total_pnl is not None else "–"),
             ("Total volume", f"${m.total_volume:,.2f}" if m.total_volume is not None else "–"),
-            ("Sharpe ratio", f"{m.sharpe_ratio:.3f}" if m.sharpe_ratio is not None else "– (need 90+ trades)"),
-            ("Profit factor", f"{m.profit_factor:.3f}" if m.profit_factor is not None else "–"),
+            ("Portfolio value", f"${m.portfolio_value:,.2f}" if m.portfolio_value is not None else "–"),
+            ("Positions", str(m.trade_count)),
+            ("Resolved", str(m.realized_position_count)),
+            ("Unresolved", str(m.unresolved_position_count)),
             ("Markets traded", str(m.market_count)),
-            ("Avg hold time", f"{m.avg_hold_time_hours:.1f}h" if m.avg_hold_time_hours is not None else "–"),
-            ("Exit quality", f"{m.exit_quality:.3f}" if m.exit_quality is not None else "–"),
+            ("Avg position size", f"${m.avg_position_size:,.2f}" if m.avg_position_size is not None else "–"),
+            ("Max position size", f"${m.max_position_size_usd:,.2f}" if m.max_position_size_usd is not None else "–"),
+            ("P&L from top 3", f"{m.pct_pnl_from_top_3_positions:.1%}" if m.pct_pnl_from_top_3_positions is not None else "–"),
         ]
         for label, val in pairs:
             metrics_table.add_row(label, val)
@@ -231,30 +239,42 @@ def wallet(address: str) -> None:
         if all_flags:
             console.print(f"[red]Red flags: {', '.join(all_flags)}[/red]")
 
-    if trades:
-        console.rule(f"Recent Trades ({min(10, len(trades))} of {len(trades)})")
-        t_table = Table(show_header=True)
-        t_table.add_column("Date", style="dim")
-        t_table.add_column("Side")
-        t_table.add_column("Outcome")
-        t_table.add_column("Size", justify="right")
-        t_table.add_column("Price", justify="right")
-        t_table.add_column("P&L", justify="right")
-        t_table.add_column("Market")
+    if positions:
+        # Sort by absolute cash_pnl descending; show top 10
+        sorted_positions = sorted(
+            positions,
+            key=lambda p: abs(p.cash_pnl) if p.cash_pnl is not None else 0.0,
+            reverse=True,
+        )
+        display = sorted_positions[:10]
+        console.rule(f"Top Positions ({len(display)} of {len(positions)})")
+        p_table = Table(show_header=True)
+        p_table.add_column("Status", style="dim")
+        p_table.add_column("Outcome")
+        p_table.add_column("Cash P&L", justify="right")
+        p_table.add_column("Size", justify="right")
+        p_table.add_column("Avg Price", justify="right")
+        p_table.add_column("Market")
 
-        for t in sorted(trades, key=lambda x: x.timestamp, reverse=True)[:10]:
-            pnl_str = f"${t.pnl:,.2f}" if t.pnl is not None else "–"
-            pnl_style = "green" if (t.pnl or 0) > 0 else "red" if (t.pnl or 0) < 0 else ""
-            t_table.add_row(
-                t.timestamp.strftime("%Y-%m-%d"),
-                t.side,
-                t.outcome or "–",
-                f"${t.size:,.2f}",
-                f"{t.price:.3f}",
+        for pos in display:
+            status = "[green]RESOLVED[/green]" if pos.redeemable else "open"
+            pnl_val = pos.cash_pnl or 0.0
+            pnl_str = f"${pnl_val:,.2f}"
+            pnl_style = "green" if pnl_val > 0 else "red" if pnl_val < 0 else ""
+            size_str = f"${pos.size:,.2f}" if pos.size is not None else "–"
+            price_str = f"{pos.avg_price:.3f}" if pos.avg_price is not None else "–"
+            title = (pos.title or pos.condition_id)[:45]
+            outcome = pos.outcome or "?"
+
+            p_table.add_row(
+                status,
+                outcome,
                 f"[{pnl_style}]{pnl_str}[/{pnl_style}]",
-                (t.market_question or t.market_id)[:40],
+                size_str,
+                price_str,
+                title,
             )
-        console.print(t_table)
+        console.print(p_table)
 
 
 # ── watch ─────────────────────────────────────────────────────────────────────

@@ -14,23 +14,25 @@ Wallet-Scanner/
 ├── requirements.txt
 ├── .env.example
 ├── data/
-│   ├── schema.py        SQLModel table definitions (Wallet, Trade, WalletMetrics, …)
+│   ├── schema.py        SQLModel table definitions (Wallet, Position, WalletMetrics, …)
 │   └── database.py      Engine + session management
 ├── scanner/
 │   ├── client.py        Async httpx wrapper — rate-limited, cached, retry-backed
 │   ├── repository.py    All DB reads/writes for scanner module
-│   ├── metrics.py       Pure-function stats: win rate, Sharpe, profit factor, …
+│   ├── metrics.py       Pure-function stats from positions + leaderboard data
 │   ├── ranking.py       Composite ranking algorithm
 │   └── scanner.py       Scan orchestrator (async, bounded concurrency)
 ├── analysis/
 │   ├── claude_review.py Claude qualitative review — top 200 wallets only
-│   ├── patterns.py      Behaviour pattern extraction
+│   ├── patterns.py      Behaviour pattern stubs (position-based analysis)
 │   └── red_flags.py     Heuristic detectors: survivorship, concentration, …
 ├── watch/
 │   ├── poller.py        Async position-polling loop
 │   └── alerter.py       Terminal + Discord/Telegram alerts
 ├── dashboard/
 │   └── app.py           4-panel Textual dashboard
+├── scripts/
+│   └── drop_trade_table.py  Migration: drop old trade table, recreate walletmetrics
 └── tests/
     ├── conftest.py
     ├── test_metrics.py
@@ -44,14 +46,18 @@ Wallet-Scanner/
 Polymarket Data API
        │
        ▼
+/v1/leaderboard sweep  ← wallet discovery + authoritative P&L/volume per wallet
+       │
+       ▼
 scanner/client.py   ← rate-limited 2 req/s, in-memory cache + TTL, tenacity retries
        │
        ▼
 scanner/scanner.py  ← async gather with Semaphore(50) concurrency cap
        │
-       ├─ parse_trades → Trade rows → SQLite
+       ├─ /positions per wallet → Position rows → DB
+       ├─ /value per wallet → portfolio_value
        ├─ compute_metrics → WalletMetrics rows
-       ├─ apply_hard_filters (min 100 trades, 60% win rate, $5k volume)
+       ├─ apply_hard_filters (min 30 positions, $5k P&L, $5k volume, 10 resolved)
        ├─ rank_wallets → WalletRanking rows
        ├─ red_flags.get_red_flags → heuristic_red_flags JSON
        └─ claude_review (top 200 only) → skill_signal, edge_hypothesis, notes
@@ -64,6 +70,14 @@ scanner/scanner.py  ← async gather with Semaphore(50) concurrency cap
 main.py leaderboard/wallet          dashboard/app.py
 main.py alerts → watch/poller.py
 ```
+
+### Why leaderboard + positions, not /activity
+
+`/activity` returns transaction events without resolution data — all 3.4M historical
+trade rows had `pnl=NULL` and `is_resolved=FALSE`. Polymarket's `/v1/leaderboard`
+provides authoritative P&L computed by Polymarket itself. `/positions` provides
+per-position resolution data including `redeemable` (TRUE = market resolved),
+`cashPnl`, and position sizing. The scanner uses both.
 
 ---
 
@@ -87,6 +101,17 @@ cp .env.example .env
 # Edit .env and set ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+### Database migration (existing Neon deployments)
+
+If upgrading from the trade-based schema, run once after deploying this version:
+
+```bash
+python scripts/drop_trade_table.py
+```
+
+This drops the `trade` table (3.4M rows, ~400MB) and recreates `walletmetrics`
+with the new position-based schema. Then run a full scan to repopulate.
+
 ---
 
 ## CLI Commands
@@ -97,14 +122,15 @@ cp .env.example .env
 python main.py scan
 ```
 
-Runs the complete pipeline: discover wallets → fetch trades → compute metrics → rank →
-Claude review top 200. Expects ≤30 minutes for the full wallet universe.
+Runs the complete pipeline: sweep leaderboard → fetch positions → compute metrics →
+rank → Claude review top 200. Expects ≤30 minutes for the full wallet universe.
 
 ```bash
 python main.py scan --incremental
 ```
 
-Only refreshes wallets not scanned in the last 24 hours. Safe to run daily as a cron job.
+Re-sweeps leaderboard for fresh pnl/vol, then only refreshes wallets not scanned
+in the last 24 hours. Safe to run daily as a cron job.
 
 ### Leaderboard
 
@@ -121,7 +147,8 @@ python main.py leaderboard --export json --output top100.json
 python main.py wallet 0xabc...
 ```
 
-Shows all metrics, rank, Claude review, red flags, and recent trade history.
+Shows total P&L, position metrics, top 10 positions by absolute P&L, red flags,
+and Claude review.
 
 ### Watch list
 
@@ -167,15 +194,16 @@ All settings live in `.env` (see `.env.example`):
 | `DATABASE_URL` | *(optional)* | Neon Postgres connection string; omit to use local SQLite |
 | `POLYMARKET_DATA_API_BASE` | `https://data-api.polymarket.com` | Override for testing |
 | `API_RATE_LIMIT` | `2.0` | Requests/second cap |
-| `MIN_TRADES` | `100` | Hard filter — minimum lifetime trades |
-| `MIN_WIN_RATE` | `0.60` | Hard filter — minimum win rate |
+| `MIN_TRADES` | `30` | Hard filter — minimum position count |
+| `MIN_PNL` | `5000.0` | Hard filter — minimum P&L from leaderboard |
 | `MIN_VOLUME_USD` | `5000.0` | Hard filter — minimum USDC volume |
+| `MIN_REALIZED_POSITIONS` | `10` | Hard filter — minimum resolved positions |
 | `CLAUDE_REVIEW_TOP_N` | `200` | Wallets sent to Claude (never the full set) |
-| `WEIGHT_WIN_RATE` | `0.30` | Composite score weight |
-| `WEIGHT_SHARPE` | `0.25` | Composite score weight |
-| `WEIGHT_PROFIT_FACTOR` | `0.20` | Composite score weight |
-| `WEIGHT_TOTAL_PNL` | `0.15` | Composite score weight |
-| `WEIGHT_TRADE_COUNT` | `0.10` | Composite score weight |
+| `WEIGHT_TOTAL_PNL` | `0.40` | Composite score weight |
+| `WEIGHT_REALIZED_POSITIONS` | `0.20` | Composite score weight |
+| `WEIGHT_PCT_PNL_CONCENTRATION` | `0.20` | Composite score weight (inverse — lower is better) |
+| `WEIGHT_TOTAL_VOLUME` | `0.10` | Composite score weight |
+| `WEIGHT_PORTFOLIO_VALUE` | `0.10` | Composite score weight |
 | `WALLET_CACHE_TTL` | `86400` | Seconds before a wallet is considered stale |
 | `API_CACHE_TTL` | `3600` | Seconds for raw API response cache |
 | `POLL_INTERVAL` | `300` | Alert polling interval (seconds) |
@@ -194,13 +222,13 @@ A weighted combination of five normalised components:
 
 | Component | Default weight | What it measures |
 |---|---|---|
-| Win rate | 30% | Fraction of completed trades that were profitable |
-| Sharpe ratio | 25% | Risk-adjusted return consistency (`None` if <90 trades) |
-| Profit factor | 20% | Gross profit ÷ gross loss |
-| Total P&L | 15% | Absolute profit (log-normalised up to $100k) |
-| Trade count | 10% | Volume of evidence |
+| Total P&L | 40% | Absolute profit from leaderboard (log-normalised up to $500k) |
+| Realized position count | 20% | Number of resolved positions — more = more skill evidence |
+| P&L concentration (inverse) | 20% | Lower top-3 P&L concentration = better diversification |
+| Total volume | 10% | Trading volume (log-normalised up to $1M) |
+| Portfolio value | 10% | Still active = current skin in the game |
 
-Higher scores mean more evidence of consistent, risk-adjusted skill. The weights are configurable.
+Higher scores mean more evidence of consistent, diversified skill across many resolved markets.
 
 ### Skill signal (Claude, 0–1)
 
@@ -214,20 +242,12 @@ Claude's qualitative assessment of whether the statistical profile is likely due
 
 | Flag | What it means |
 |---|---|
-| `single_bet_dominance` | >50% of all trades in one market — luck rather than diversified skill |
-| `market_concentration` | Fewer than 3 distinct markets despite enough trades |
-| `survivorship_bias` | >90% win rate on <200 trades — small sample, cherry-picked history |
-| `volume_size_mismatch` | P&L > 300% of volume — likely data artefact |
-| `recency_cliff` | Recent win rate < 70% of historical — may be mean-reverting |
-| `insider_timing` | Consistent entries within 1 hour of market open |
+| `single_bet_dominance` | Top 3 positions account for >70% of P&L — luck rather than diversified skill |
+| `market_concentration` | >70% of positions in a single market |
+| `survivorship` | Unresolved positions outnumber resolved by 3:1 — wallet looks good only because losing bets haven't settled |
+| `recency_cliff` | Recent win rate < 70% of historical (requires external data, not auto-detected) |
 
 A wallet with red flags is **not automatically disqualified** — it means you should scrutinise it more carefully before acting on it.
-
-### Sharpe ratio (None vs number)
-
-By design, Sharpe is `None` for any wallet with fewer than 90 completed trades.
-This is a hard rule (not a soft default) — estimating Sharpe from 30 trades produces
-misleading numbers. `None` means "insufficient data", not zero.
 
 ---
 
@@ -245,11 +265,11 @@ A full weekly refresh should cost well under $4 in Claude API usage.
 
 ## Realistic expectations
 
-The Polymarket Data API leaderboard caps each slice at offset=1000 with a maximum of 50 results per page. To build the widest possible wallet universe, the scanner sweeps multiple combinations of `timePeriod` (ALL, MONTH, WEEK), `category` (OVERALL, POLITICS, SPORTS, CRYPTO, ECONOMICS, TECH, FINANCE), and `orderBy` (PNL, VOL), then deduplicates by `proxyWallet`.
+The Polymarket Data API leaderboard caps each slice at offset=1000 with a maximum of 50 results per page. The scanner sweeps multiple combinations of `timePeriod` (ALL, MONTH, WEEK), `category` (OVERALL, POLITICS, SPORTS, CRYPTO, ECONOMICS, TECH, FINANCE), and `orderBy` (PNL, VOL), then deduplicates by `proxyWallet`.
 
-**Realistic wallet universe: 2,000–4,000 unique addresses** after full deduplication across all sweep dimensions.
+**Realistic wallet universe: 2,000–4,000 unique addresses** after full deduplication.
 
-Filtering this down to the top ~50 wallets with consistent, risk-adjusted skill is still meaningful at this scale. Early claims of 14,000+ addressable wallets were unverifiable and not reproducible via the official API.
+Of these, the hard filters (min $5k P&L, min $5k volume, min 30 positions, min 10 resolved) should pass **1,000–2,000 wallets**. After red flag review and Claude qualitative analysis, the analytically interesting universe is typically **50–200 wallets**.
 
 ---
 
@@ -259,54 +279,16 @@ The repository includes a GitHub Actions workflow (`.github/workflows/scheduled-
 runs the wallet scanner automatically every **Monday at 06:00 UTC** and writes results to Neon
 Postgres, so the leaderboard stays fresh without needing to open Codespaces.
 
-### Changing the schedule
-
-Edit the `cron` line in `.github/workflows/scheduled-scan.yml`:
-
-```yaml
-on:
-  schedule:
-    - cron: "0 6 * * 1"   # ← change this
-```
-
-Use [crontab.guru](https://crontab.guru) to build a cron expression. Examples:
-
-| Schedule | Expression |
-|---|---|
-| Every day at midnight UTC | `0 0 * * *` |
-| Every 6 hours | `0 */6 * * *` |
-| Weekdays at 07:00 UTC | `0 7 * * 1-5` |
-
 ### Manual trigger
 
-Go to **Actions → Scheduled Wallet Scan → Run workflow** to kick off a scan immediately
-without waiting for the next cron tick.
+Go to **Actions → Scheduled Wallet Scan → Run workflow** to kick off a scan immediately.
 
 ### Required GitHub secrets
-
-Add these under **Settings → Secrets and variables → Actions → New repository secret**:
 
 | Secret | What it is |
 |---|---|
 | `ANTHROPIC_API_KEY` | Your Anthropic API key (`sk-ant-...`) |
-| `DATABASE_URL` | Your Neon Postgres connection string (`postgresql://user:pass@host/db?sslmode=require`) |
-
-To set up Neon Postgres:
-1. Sign up at [neon.tech](https://neon.tech)
-2. Create a new project and database
-3. Copy the connection string from the dashboard
-4. Add it as `DATABASE_URL` in Vercel environment variables, GitHub Secrets, and your local `.env`
-
-### Cost expectations
-
-| Cost | Estimate |
-|---|---|
-| GitHub Actions runtime per scan | ~30 min (free tier: 2,000 min/month — ~66 scans) |
-| Anthropic API per scan | ~$2–4 (Claude called on top 200 wallets only) |
-
-Actions runtime is free; Claude API calls are not. The `--incremental` flag skips wallets
-refreshed in the last 24 hours and skips Claude reviews completed in the last 7 days,
-keeping per-run API costs low for weekly cadence.
+| `DATABASE_URL` | Your Neon Postgres connection string |
 
 ---
 
@@ -327,5 +309,5 @@ with fixtures and does not make any live API calls.
 - **No private keys.** The project never loads, stores, or transmits any keys.
 - **No web framework.** Terminal only.
 - **No public deployment.** Local laptop or personal VPS only.
-- **No fabricated metrics.** Sharpe is `None`, not estimated, when data is insufficient.
+- **No fabricated metrics.** All metrics derive from real API data.
 - **Claude called on top 200 only.** Never on the full wallet population.

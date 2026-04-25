@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 from data.database import get_engine
 from data.schema import (
     Alert,
-    Trade,
+    Position,
     Wallet,
     WalletMetrics,
     WalletRanking,
@@ -66,41 +66,27 @@ def get_all_wallets() -> list[Wallet]:
         return list(s.exec(select(Wallet)).all())
 
 
-# ── Trades ────────────────────────────────────────────────────────────────────
+# ── Positions ─────────────────────────────────────────────────────────────────
 
-def upsert_trades(trades: list[Trade]) -> None:
-    """Bulk-insert trades that aren't already stored. Idempotent via timestamp+market uniqueness."""
-    if not trades:
+def upsert_positions(positions: list[Position]) -> None:
+    """Replace all positions for a wallet with the freshly fetched set."""
+    if not positions:
         return
-    address = trades[0].wallet_address
+    address = positions[0].wallet_address
     with _session() as s:
-        # Load existing (market_id, timestamp) key strings for this wallet
-        existing_rows = s.exec(
-            select(Trade.market_id, Trade.timestamp).where(Trade.wallet_address == address)
-        ).all()
-        existing: set[str] = {
-            f"{row[0]}|{row[1]}" for row in existing_rows
-        }
-
-        new = [
-            t
-            for t in trades
-            if f"{t.market_id}|{t.timestamp}" not in existing
-        ]
-        if new:
-            s.add_all(new)
-            s.commit()
-            logger.debug(
-                "Inserted %d new trades for %s (skipped %d duplicates)",
-                len(new),
-                address,
-                len(trades) - len(new),
-            )
+        # Delete all existing positions for this wallet before reinserting
+        existing = s.exec(select(Position).where(Position.wallet_address == address)).all()
+        for row in existing:
+            s.delete(row)
+        s.flush()
+        s.add_all(positions)
+        s.commit()
+        logger.debug("Stored %d positions for %s", len(positions), address)
 
 
-def get_trades_for_wallet(address: str) -> list[Trade]:
+def get_positions_for_wallet(address: str) -> list[Position]:
     with _session() as s:
-        stmt = select(Trade).where(Trade.wallet_address == address).order_by(Trade.timestamp)
+        stmt = select(Position).where(Position.wallet_address == address)
         return list(s.exec(stmt).all())
 
 

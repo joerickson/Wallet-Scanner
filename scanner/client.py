@@ -83,7 +83,7 @@ class PolymarketClient:
     Usage::
 
         async with PolymarketClient() as client:
-            traders = await client.get_all_traders()
+            addresses, lb_data = await client.get_all_traders_with_data()
     """
 
     def __init__(
@@ -164,7 +164,7 @@ class PolymarketClient:
         offset: int = 0,
         activity_type: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Return activity records for a wallet (user address required)."""
+        """Return activity records for a wallet (used by the watch/alert system)."""
         params: dict[str, Any] = {"user": user, "limit": limit, "offset": offset}
         if activity_type:
             params["type"] = activity_type
@@ -178,22 +178,71 @@ class PolymarketClient:
         offset: int = 0,
         size_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
-        """Return current open positions for a wallet."""
+        """Return a page of positions for a wallet."""
         params: dict[str, Any] = {"user": user, "limit": limit, "offset": offset}
         if size_threshold is not None:
             params["sizeThreshold"] = size_threshold
         data = await self._get("/positions", params)
         return _as_list(data)
 
-    async def get_all_traders(self, max_wallets: int = 10_000) -> list[str]:
+    async def get_wallet_positions(
+        self, address: str, max_positions: int = 200
+    ) -> list[dict[str, Any]]:
+        """Fetch all positions for one wallet, paginating as needed."""
+        positions: list[dict[str, Any]] = []
+        offset = 0
+        limit = 100
+
+        while len(positions) < max_positions:
+            try:
+                batch = await self.get_positions(user=address, limit=limit, offset=offset)
+            except httpx.HTTPStatusError as exc:
+                logger.warning(
+                    "Positions fetch error for %s at offset=%d: %s", address, offset, exc
+                )
+                break
+            if not batch:
+                break
+            positions.extend(batch)
+            if len(batch) < limit:
+                break
+            offset += limit
+
+        return positions[:max_positions]
+
+    async def get_wallet_value(self, address: str) -> float | None:
+        """Return the current portfolio USDC value for a wallet, or None on error."""
+        try:
+            data = await self._get("/value", {"user": address})
+        except httpx.HTTPStatusError as exc:
+            logger.warning("Value fetch error for %s: %s", address, exc)
+            return None
+        if isinstance(data, dict):
+            raw = data.get("value")
+            if raw is not None:
+                try:
+                    return float(raw)
+                except (TypeError, ValueError):
+                    pass
+        return None
+
+    async def get_all_traders_with_data(
+        self, max_wallets: int = 10_000
+    ) -> tuple[list[str], dict[str, dict[str, Any]]]:
         """
         Discover wallet addresses by sweeping the leaderboard across all
         timePeriod × category × orderBy combinations, paginating each slice
         up to offset=1000, then deduping by proxyWallet.
 
+        Returns a tuple of:
+        - list of unique wallet addresses (up to max_wallets)
+        - dict mapping address → {pnl, vol} from the leaderboard (first-seen wins,
+          so ALL-time data takes priority since it is swept first)
+
         Realistic yield: 2,000–4,000 unique wallets after deduplication.
         """
         addresses: set[str] = set()
+        leaderboard_data: dict[str, dict[str, Any]] = {}
 
         combinations = list(
             itertools.product(_SWEEP_TIME_PERIODS, _SWEEP_CATEGORIES, _SWEEP_ORDER_BY)
@@ -222,6 +271,12 @@ class PolymarketClient:
                     addr = _extract_address(r)
                     if addr:
                         addresses.add(addr)
+                        # First-seen wins — ALL time period is swept first
+                        if addr not in leaderboard_data:
+                            leaderboard_data[addr] = {
+                                "pnl": _safe_float(r.get("pnl")),
+                                "vol": _safe_float(r.get("vol")),
+                            }
                 if len(records) < _LEADERBOARD_MAX_LIMIT:
                     break
                 offset += _LEADERBOARD_MAX_LIMIT
@@ -231,34 +286,12 @@ class PolymarketClient:
 
         result = list(addresses)[:max_wallets]
         logger.info("Discovered %d unique wallet addresses", len(result))
-        return result
+        return result, leaderboard_data
 
-    async def get_wallet_trades(
-        self, address: str, max_trades: int = 2_000
-    ) -> list[dict[str, Any]]:
-        """Fetch the full trade history for one wallet, paginating as needed."""
-        trades: list[dict[str, Any]] = []
-        offset = 0
-        limit = 500
-
-        while len(trades) < max_trades:
-            try:
-                batch = await self.get_activity(
-                    user=address, limit=limit, offset=offset
-                )
-            except httpx.HTTPStatusError as exc:
-                logger.warning(
-                    "Trade fetch error for %s at offset=%d: %s", address, offset, exc
-                )
-                break
-            if not batch:
-                break
-            trades.extend(batch)
-            if len(batch) < limit:
-                break
-            offset += limit
-
-        return trades
+    async def get_all_traders(self, max_wallets: int = 10_000) -> list[str]:
+        """Discover wallet addresses. Returns addresses only (no leaderboard data)."""
+        addresses, _ = await self.get_all_traders_with_data(max_wallets=max_wallets)
+        return addresses
 
 
 # ── Utilities ──────────────────────────────────────────────────────────────────
@@ -283,18 +316,24 @@ def _extract_address(record: dict[str, Any]) -> str | None:
     return None
 
 
+def _safe_float(val: Any) -> float | None:
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
 # ── Smoke test ─────────────────────────────────────────────────────────────────
 
 async def _smoketest() -> None:
-    """Sanity-check the four confirmed endpoints — prints PASS/FAIL per endpoint."""
+    """Sanity-check the confirmed endpoints — prints PASS/FAIL per endpoint."""
     base = POLYMARKET_DATA_API_BASE.rstrip("/")
-    # Zero address returns empty results (200) on all per-wallet endpoints
     sample_wallet = "0x0000000000000000000000000000000000000000"
 
     checks: list[tuple[str, dict[str, Any]]] = [
         ("/v1/leaderboard", {"timePeriod": "ALL", "limit": 1, "offset": 0, "orderBy": "PNL", "category": "OVERALL"}),
-        ("/activity", {"user": sample_wallet, "limit": 1}),
-        ("/trades", {"user": sample_wallet, "limit": 1}),
         ("/positions", {"user": sample_wallet, "limit": 1}),
         ("/value", {"user": sample_wallet}),
     ]

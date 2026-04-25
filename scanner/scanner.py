@@ -9,7 +9,7 @@ from data.database import init_db
 from data.schema import WalletMetrics, WalletRanking
 from scanner import repository as repo
 from scanner.client import PolymarketClient
-from scanner.metrics import apply_hard_filters, compute_metrics, parse_trades
+from scanner.metrics import apply_hard_filters, compute_metrics, parse_positions
 from scanner.ranking import rank_wallets
 
 logger = logging.getLogger(__name__)
@@ -24,13 +24,12 @@ async def run_scan(
 ) -> list[WalletRanking]:
     """
     Full scan pipeline:
-      1. Decide which wallets to refresh (all, or only stale ones in incremental mode)
-      2. Fetch trade histories (async, bounded concurrency)
-      3. Load all metrics from DB + apply hard filters
-      4. Rank ALL wallets (not just refreshed ones)
+      1. Sweep /v1/leaderboard to discover wallets and capture pnl/vol per wallet
+      2. Fetch /positions and /value for each wallet that needs refresh
+      3. Compute metrics from positions + leaderboard data
+      4. Apply hard filters → rank all wallets
       5. Detect heuristic red flags
       6. Claude qualitative review on top N (skip fresh reviews in incremental mode)
-      7. Sync writes to Turso (no-op if using local SQLite)
 
     Returns the final ranked list.
     """
@@ -38,39 +37,56 @@ async def run_scan(
     init_db()
 
     async with PolymarketClient() as client:
-        # ── Step 1: Determine which wallets to fetch ──────────────────────────
+        # ── Step 1: Always sweep leaderboard to discover wallets + get pnl/vol ─
+        all_addresses, leaderboard_data = await client.get_all_traders_with_data(
+            max_wallets=max_wallets
+        )
+        repo.upsert_wallets(all_addresses)
+        logger.info("Leaderboard sweep complete: %d unique wallet addresses", len(all_addresses))
+
+        # ── Step 2: Determine which wallets need positions+value refresh ────────
         if incremental:
             stale = repo.get_stale_wallets(older_than_hours=24)
             addresses_to_refresh = [w.address for w in stale]
-
             if not addresses_to_refresh:
-                if not repo.get_all_wallets():
-                    # Empty DB — first scheduled run, fall back to full discovery
-                    logger.info("Incremental: empty DB, running initial wallet discovery")
-                    addresses_to_refresh = await client.get_all_traders(max_wallets=max_wallets)
-                    repo.upsert_wallets(addresses_to_refresh)
-                else:
-                    logger.info("Incremental: all wallets are fresh, skipping fetch phase")
+                logger.info("Incremental: all wallets are fresh, skipping enrichment phase")
             else:
                 logger.info("Incremental: %d stale wallets to refresh", len(addresses_to_refresh))
         else:
-            addresses_to_refresh = await client.get_all_traders(max_wallets=max_wallets)
-            repo.upsert_wallets(addresses_to_refresh)
-            logger.info("Full scan: %d wallet addresses", len(addresses_to_refresh))
+            addresses_to_refresh = all_addresses
+            logger.info("Full scan: refreshing %d wallets", len(addresses_to_refresh))
 
-        # ── Step 2: Fetch + compute metrics (bounded concurrency) ─────────────
+        # ── Step 3: Fetch positions + value for wallets to refresh ─────────────
         if addresses_to_refresh:
             sem = asyncio.Semaphore(_CONCURRENCY)
 
             async def process_wallet(address: str) -> None:
                 async with sem:
                     try:
-                        raw_trades = await client.get_wallet_trades(address)
-                        if not raw_trades:
-                            return
-                        trades = parse_trades(address, raw_trades)
-                        repo.upsert_trades(trades)
-                        metrics = compute_metrics(trades)
+                        lb = leaderboard_data.get(address)
+                        lb_pnl: float | None = lb.get("pnl") if lb else None
+                        lb_vol: float | None = lb.get("vol") if lb else None
+
+                        # Fall back to stored metrics if wallet not in current sweep
+                        if lb_pnl is None or lb_vol is None:
+                            existing = repo.get_metrics_for_wallet(address)
+                            if existing:
+                                lb_pnl = lb_pnl or existing.total_pnl
+                                lb_vol = lb_vol or existing.total_volume
+
+                        raw_positions = await client.get_wallet_positions(address)
+                        portfolio_value = await client.get_wallet_value(address)
+
+                        positions = parse_positions(address, raw_positions)
+                        if positions:
+                            repo.upsert_positions(positions)
+
+                        metrics = compute_metrics(
+                            positions=positions,
+                            leaderboard_pnl=lb_pnl,
+                            leaderboard_vol=lb_vol,
+                            portfolio_value=portfolio_value,
+                        )
                         if metrics:
                             repo.upsert_metrics(metrics)
                         repo.mark_wallet_scanned(address)
@@ -78,22 +94,23 @@ async def run_scan(
                         logger.warning("Skipping wallet %s: %s", address, exc)
 
             await asyncio.gather(*[process_wallet(addr) for addr in addresses_to_refresh])
-            logger.info("Refreshed metrics for up to %d wallets", len(addresses_to_refresh))
+            logger.info("Refreshed %d wallets", len(addresses_to_refresh))
 
-        # ── Step 3: Load ALL metrics + apply hard filters ─────────────────────
-        # Always rank the full DB, not just the wallets refreshed this run.
+        # ── Step 4: Load ALL metrics + apply hard filters ──────────────────────
         all_metrics = repo.get_all_metrics()
         filtered = apply_hard_filters(all_metrics)
         if not filtered:
-            logger.warning("No wallets passed hard filters — check MIN_TRADES / MIN_WIN_RATE")
+            logger.warning(
+                "No wallets passed hard filters — check MIN_TRADES / MIN_PNL / MIN_REALIZED_POSITIONS"
+            )
             return []
         logger.info("Hard filters passed: %d wallets", len(filtered))
 
-        # ── Step 4: Composite ranking ─────────────────────────────────────────
+        # ── Step 5: Composite ranking ──────────────────────────────────────────
         rankings = rank_wallets(filtered)
         repo.upsert_rankings(rankings)
 
-        # ── Step 5: Heuristic red flags ───────────────────────────────────────
+        # ── Step 6: Heuristic red flags ────────────────────────────────────────
         from analysis.red_flags import get_red_flags
 
         metrics_by_addr = {m.wallet_address: m for m in filtered}
@@ -103,11 +120,10 @@ async def run_scan(
                 flags = get_red_flags(metrics)
                 repo.update_heuristic_flags(ranking.wallet_address, flags)
 
-        # ── Step 6: Claude qualitative review (top N only) ────────────────────
+        # ── Step 7: Claude qualitative review (top N only) ─────────────────────
         top_n = rankings[:CLAUDE_REVIEW_TOP_N]
         if top_n:
             if incremental:
-                # Skip wallets whose Claude review is less than 7 days old
                 cutoff = datetime.utcnow() - timedelta(days=_CLAUDE_REVIEW_TTL_DAYS)
                 db_rankings = repo.get_rankings_for_wallets(
                     [r.wallet_address for r in top_n]
@@ -143,7 +159,7 @@ async def _claude_review_pass(
             if metrics is None:
                 return
             try:
-                result = await review_wallet(ranking.wallet_address, metrics)
+                result = await review_wallet(ranking.wallet_address, metrics, ranking.rank)
                 if result:
                     repo.update_claude_review(
                         ranking.wallet_address,

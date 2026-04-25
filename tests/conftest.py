@@ -1,36 +1,36 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pytest
 
-from data.schema import Trade, WalletMetrics
+from data.schema import Position, WalletMetrics
 
 
-def _make_trade(
+def _make_position(
     wallet: str,
-    market: str,
-    side: str = "BUY",
+    condition_id: str,
+    title: str | None = None,
+    outcome: str = "Yes",
     size: float = 100.0,
-    price: float = 0.5,
-    pnl: float | None = None,
-    timestamp: datetime | None = None,
-    outcome: str | None = "Yes",
-    is_resolved: bool = False,
-    resolution_price: float | None = None,
-) -> Trade:
-    return Trade(
+    avg_price: float = 0.5,
+    initial_value: float = 100.0,
+    cash_pnl: float | None = None,
+    redeemable: bool = False,
+    asset: str | None = None,
+) -> Position:
+    return Position(
         wallet_address=wallet,
-        market_id=market,
-        market_question=f"Will {market} happen?",
-        side=side,
+        condition_id=condition_id,
+        asset=asset or f"0xasset_{condition_id}",
+        title=title or f"Will {condition_id} happen?",
         outcome=outcome,
         size=size,
-        price=price,
-        pnl=pnl,
-        is_resolved=is_resolved,
-        resolution_price=resolution_price,
-        timestamp=timestamp or datetime.utcnow(),
+        avg_price=avg_price,
+        initial_value=initial_value,
+        current_value=initial_value * (1 + (cash_pnl or 0) / initial_value) if initial_value else None,
+        cash_pnl=cash_pnl,
+        redeemable=redeemable,
     )
 
 
@@ -40,93 +40,115 @@ def wallet_address() -> str:
 
 
 @pytest.fixture
-def profitable_trades(wallet_address: str) -> list[Trade]:
-    """60 winning trades and 10 losing — above filter thresholds."""
-    base_time = datetime(2024, 1, 1)
-    trades = []
-    for i in range(120):
-        ts = base_time + timedelta(hours=i * 6)
-        pnl = 50.0 if i % 2 == 0 else -20.0  # ~60% win rate
-        trades.append(
-            _make_trade(
+def resolved_positions(wallet_address: str) -> list[Position]:
+    """40 resolved positions across 10 markets — passes hard filters."""
+    positions = []
+    for i in range(40):
+        positions.append(
+            _make_position(
                 wallet=wallet_address,
-                market=f"market_{i % 10}",  # 10 distinct markets
-                side="BUY" if i % 3 != 0 else "SELL",
+                condition_id=f"market_{i % 10}",
+                title=f"Market question {i % 10}",
+                outcome="Yes" if i % 2 == 0 else "No",
                 size=200.0,
-                price=0.4 + (i % 5) * 0.05,
-                pnl=pnl,
-                timestamp=ts,
-                is_resolved=True,
-                resolution_price=1.0 if pnl > 0 else 0.0,
+                avg_price=0.4 + (i % 5) * 0.05,
+                initial_value=200.0,
+                cash_pnl=50.0 if i % 3 != 0 else -20.0,
+                redeemable=True,
             )
         )
-    return trades
+    return positions
 
 
 @pytest.fixture
-def sparse_trades(wallet_address: str) -> list[Trade]:
-    """50 trades — below the MIN_TRADES threshold of 100."""
-    base = datetime(2024, 1, 1)
-    return [
-        _make_trade(
-            wallet=wallet_address,
-            market=f"market_{i % 3}",
-            size=100.0,
-            price=0.5,
-            pnl=30.0,
-            timestamp=base + timedelta(hours=i * 12),
+def mixed_positions(wallet_address: str) -> list[Position]:
+    """50 positions: 35 resolved, 15 unresolved, across 8 markets."""
+    positions = []
+    for i in range(50):
+        positions.append(
+            _make_position(
+                wallet=wallet_address,
+                condition_id=f"market_{i % 8}",
+                size=150.0,
+                initial_value=150.0,
+                cash_pnl=30.0 if i % 2 == 0 else -10.0,
+                redeemable=(i < 35),
+            )
         )
-        for i in range(50)
+    return positions
+
+
+@pytest.fixture
+def sparse_positions(wallet_address: str) -> list[Position]:
+    """15 positions — below the MIN_TRADES threshold of 30."""
+    return [
+        _make_position(
+            wallet=wallet_address,
+            condition_id=f"market_{i % 3}",
+            size=100.0,
+            cash_pnl=30.0,
+            redeemable=True,
+        )
+        for i in range(15)
     ]
 
 
 @pytest.fixture
-def single_market_trades(wallet_address: str) -> list[Trade]:
-    """110 trades all on the same market — triggers single_bet_dominance."""
-    base = datetime(2024, 1, 1)
+def single_market_positions(wallet_address: str) -> list[Position]:
+    """40 positions all on the same market — triggers market_concentration."""
     return [
-        _make_trade(
+        _make_position(
             wallet=wallet_address,
-            market="market_only_one",
+            condition_id="market_only_one",
             size=100.0,
-            price=0.5,
-            pnl=20.0 if i % 3 != 0 else -10.0,
-            timestamp=base + timedelta(hours=i * 4),
+            cash_pnl=20.0 if i % 3 != 0 else -10.0,
+            redeemable=(i % 2 == 0),
         )
-        for i in range(110)
+        for i in range(40)
     ]
 
 
 @pytest.fixture
-def high_win_rate_sparse(wallet_address: str) -> list[Trade]:
-    """150 trades with 95% win rate — triggers survivorship_bias."""
-    base = datetime(2024, 1, 1)
-    return [
-        _make_trade(
+def concentrated_pnl_positions(wallet_address: str) -> list[Position]:
+    """35 positions where one outsized position dominates P&L."""
+    positions = [
+        _make_position(
             wallet=wallet_address,
-            market=f"market_{i % 20}",
+            condition_id=f"market_{i}",
             size=100.0,
-            price=0.5,
-            pnl=50.0 if i < 142 else -10.0,  # 95% win rate
-            timestamp=base + timedelta(hours=i * 6),
+            cash_pnl=10.0,
+            redeemable=True,
         )
-        for i in range(150)
+        for i in range(34)
     ]
+    # Add one outsized winner
+    positions.append(
+        _make_position(
+            wallet=wallet_address,
+            condition_id="market_big",
+            size=5000.0,
+            initial_value=5000.0,
+            cash_pnl=80000.0,
+            redeemable=True,
+        )
+    )
+    return positions
 
 
 @pytest.fixture
 def basic_metrics(wallet_address: str) -> WalletMetrics:
     return WalletMetrics(
         wallet_address=wallet_address,
-        trade_count=120,
-        win_count=72,
-        loss_count=48,
-        win_rate=0.60,
-        total_pnl=2500.0,
-        total_volume=24000.0,
-        sharpe_ratio=1.5,
-        profit_factor=2.1,
-        market_count=10,
+        trade_count=50,
+        total_pnl=15000.0,
+        total_volume=80000.0,
+        market_count=12,
         top_market_concentration=0.15,
+        portfolio_value=5000.0,
+        realized_position_count=35,
+        unresolved_position_count=15,
+        avg_position_size=200.0,
+        max_position_size_usd=2000.0,
+        pct_pnl_from_top_3_positions=0.30,
         computed_at=datetime.utcnow(),
     )
