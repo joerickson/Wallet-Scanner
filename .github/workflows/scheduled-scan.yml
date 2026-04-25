@@ -1,1 +1,57 @@
+name: Scheduled Wallet Scan
 
+# Runs every Monday at 06:00 UTC.
+# To change the cadence, edit the cron expression below.
+# Examples:
+#   Every day at midnight UTC:  "0 0 * * *"
+#   Every 6 hours:              "0 */6 * * *"
+#   Weekdays at 07:00 UTC:      "0 7 * * 1-5"
+# Reference: https://crontab.guru
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch: # Manual trigger from the Actions tab
+
+concurrency:
+  group: scheduled-scan
+  cancel-in-progress: false # Never cancel a running scan — let it finish
+
+permissions:
+  contents: read
+  issues: write # Required for the failure-notification step
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run incremental wallet scan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: python main.py scan --incremental
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          gh issue create \
+            --title "Scheduled scan failed at ${TIMESTAMP}" \
+            --body "The scheduled wallet scan failed. [View run](${RUN_URL})"
