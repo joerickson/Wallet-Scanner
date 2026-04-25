@@ -192,6 +192,13 @@ def get_ranking_for_wallet(address: str) -> WalletRanking | None:
         return s.get(WalletRanking, address)
 
 
+def get_rankings_for_wallets(addresses: list[str]) -> dict[str, WalletRanking]:
+    """Return a mapping of address → WalletRanking for the given addresses."""
+    with _session() as s:
+        stmt = select(WalletRanking).where(WalletRanking.wallet_address.in_(addresses))
+        return {r.wallet_address: r for r in s.exec(stmt).all()}
+
+
 # ── Watched wallets ───────────────────────────────────────────────────────────
 
 def add_to_watchlist(address: str) -> bool:

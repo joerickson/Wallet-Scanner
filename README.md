@@ -252,6 +252,60 @@ Filtering this down to the top ~50 wallets with consistent, risk-adjusted skill 
 
 ---
 
+## Automated scans
+
+The repository includes a GitHub Actions workflow (`.github/workflows/scheduled-scan.yml`) that
+runs the wallet scanner automatically every **Monday at 06:00 UTC** and writes results to Turso,
+so the leaderboard stays fresh without needing to open Codespaces.
+
+### Changing the schedule
+
+Edit the `cron` line in `.github/workflows/scheduled-scan.yml`:
+
+```yaml
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # ← change this
+```
+
+Use [crontab.guru](https://crontab.guru) to build a cron expression. Examples:
+
+| Schedule | Expression |
+|---|---|
+| Every day at midnight UTC | `0 0 * * *` |
+| Every 6 hours | `0 */6 * * *` |
+| Weekdays at 07:00 UTC | `0 7 * * 1-5` |
+
+### Manual trigger
+
+Go to **Actions → Scheduled Wallet Scan → Run workflow** to kick off a scan immediately
+without waiting for the next cron tick.
+
+### Required GitHub secrets
+
+Add these under **Settings → Secrets and variables → Actions → New repository secret**:
+
+| Secret | What it is |
+|---|---|
+| `ANTHROPIC_API_KEY` | Your Anthropic API key (`sk-ant-...`) |
+| `TURSO_DATABASE_URL` | Your Turso database URL (`libsql://yourdb.turso.io`) |
+| `TURSO_AUTH_TOKEN` | Turso auth token for the database |
+
+To create a Turso database: `turso db create wallet-scanner` then `turso db show wallet-scanner`.
+
+### Cost expectations
+
+| Cost | Estimate |
+|---|---|
+| GitHub Actions runtime per scan | ~30 min (free tier: 2,000 min/month — ~66 scans) |
+| Anthropic API per scan | ~$2–4 (Claude called on top 200 wallets only) |
+
+Actions runtime is free; Claude API calls are not. The `--incremental` flag skips wallets
+refreshed in the last 24 hours and skips Claude reviews completed in the last 7 days,
+keeping per-run API costs low for weekly cadence.
+
+---
+
 ## Running tests
 
 ```bash
