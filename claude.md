@@ -2,7 +2,19 @@
 
 ## What this project is
 
-A personal Python research tool for discovering and tracking skilled wallets on Polymarket. Read-only. Single-user. The output is a SQLite database, a dashboard the owner views privately, and optional alerts.
+A personal Python research tool for discovering and tracking skilled wallets on Polymarket. Read-only. Single-user. The output is a Postgres database (Neon), a dashboard the owner views privately, and optional alerts.
+
+### Architectural decision (2026-04)
+
+`/activity` proved insufficient as the primary data source — it is a transaction log without resolution data. The scanner was refactored to use:
+
+- **`/v1/leaderboard`**: Provides authoritative P&L and volume per wallet, already computed by Polymarket.
+- **`/positions`**: Provides per-position resolution data including `redeemable` (TRUE = market resolved), `cashPnl`, `realizedPnl`, and position sizing.
+- **`/value`**: Returns current portfolio USDC value.
+
+The `trade` table was dropped. The `position` table replaces it. `WalletMetrics` now stores leaderboard-derived pnl/vol plus position-based metrics.
+
+Realistic universe: top 1,000–2,000 wallets that pass hard filters, of which 50–200 will be analytically interesting after red flag review.
 
 The dashboard MAY be deployed to a personal hosting environment (Vercel, Railway, Fly, a personal VPS, etc.) so the owner can view it from any device, including mobile. This is personal infrastructure, not a public product.
 
@@ -95,7 +107,7 @@ When adding new functionality, prefer extending an existing module over creating
 
 ### Database
 - All schema in `data/schema.py` using sqlmodel
-- Migrations append-only — add columns, never drop
+- Migrations: run `python scripts/drop_trade_table.py` when upgrading from the old trade-based schema (drops `trade` and `walletmetrics`, recreates `walletmetrics` with new fields)
 - Use transactions for multi-row writes
 - All DB writes go through `repository.py` modules — no inline SQL in business logic
 - Local development uses SQLite at `data/research.db` (no env var needed)
@@ -139,7 +151,7 @@ When adding new functionality, prefer extending an existing module over creating
 2. **No private key handling.** The project never loads, stores, or transmits keys.
 3. **No public multi-tenancy.** Single-user only — no signup, no users table, no billing.
 4. **Access control on the deployed dashboard is owner discretion.** Not a project mandate. Implement what the owner asks for, nothing more, nothing less.
-5. **No fabricated metrics.** If a wallet has fewer than 90 trades, Sharpe is `None`, not estimated.
+5. **No fabricated metrics.** All metrics derive from real API data. Never estimate or impute values for positions with missing resolution data.
 6. **Never call Claude on the full wallet population.** Numerical filters first, Claude on top 200 only.
 7. **Never silently overwrite cached data.** Cache writes include timestamps; reads check freshness.
 8. **Polymarket Data API is rate-limited.** Default 2 req/sec. Faster requires explicit owner approval.

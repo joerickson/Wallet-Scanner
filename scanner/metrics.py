@@ -6,90 +6,58 @@ from typing import Any
 
 import numpy as np
 
-from config import SHARPE_MIN_TRADES
-from data.schema import Trade, WalletMetrics
+from data.schema import Position, WalletMetrics
 
 logger = logging.getLogger(__name__)
 
-# ── Trade parsing ──────────────────────────────────────────────────────────────
 
-def parse_trades(wallet_address: str, raw: list[dict[str, Any]]) -> list[Trade]:
+# ── Position parsing ───────────────────────────────────────────────────────────
+
+def parse_positions(wallet_address: str, raw: list[dict[str, Any]]) -> list[Position]:
     """
-    Convert raw API activity records into Trade ORM objects.
-    Gracefully skips any records that are missing required fields.
+    Convert raw /positions API records into Position ORM objects.
+    Gracefully skips any records missing required fields.
     """
-    trades: list[Trade] = []
+    positions: list[Position] = []
     for record in raw:
         try:
-            trade = _parse_one(wallet_address, record)
-            if trade is not None:
-                trades.append(trade)
+            pos = _parse_one_position(wallet_address, record)
+            if pos is not None:
+                positions.append(pos)
         except Exception as exc:
-            logger.debug("Skipping malformed trade record: %s — %s", record, exc)
-    return trades
+            logger.debug("Skipping malformed position record: %s — %s", record, exc)
+    return positions
 
 
-def _parse_one(wallet_address: str, r: dict[str, Any]) -> Trade | None:
-    # Only process actual trade records, skip MERGE / SPLIT / REDEEM
-    if r.get("type", "TRADE") not in ("TRADE", "BUY", "SELL", ""):
+def _parse_one_position(wallet_address: str, r: dict[str, Any]) -> Position | None:
+    condition_id = str(r.get("conditionId") or r.get("condition_id") or "")
+    if not condition_id:
         return None
 
-    # Timestamp — accept ISO string or Unix epoch int/float
-    raw_ts = r.get("timestamp") or r.get("createdAt")
-    if raw_ts is None:
-        return None
-    timestamp = _parse_timestamp(raw_ts)
-    if timestamp is None:
-        return None
+    end_date: datetime | None = None
+    raw_end = r.get("endDate") or r.get("end_date")
+    if raw_end:
+        end_date = _parse_timestamp(raw_end)
 
-    market_id = str(r.get("market") or r.get("conditionId") or r.get("marketId") or "")
-    if not market_id:
-        return None
-
-    side = str(r.get("side") or r.get("type") or "BUY").upper()
-    if side not in ("BUY", "SELL"):
-        side = "BUY"
-
-    size_raw = r.get("usdcSize") or r.get("amount") or r.get("size") or 0
-    try:
-        size = float(size_raw)
-    except (TypeError, ValueError):
-        size = 0.0
-
-    price_raw = r.get("price") or r.get("avgPrice") or 0
-    try:
-        price = float(price_raw)
-    except (TypeError, ValueError):
-        price = 0.0
-
-    pnl_raw = r.get("pnl") or r.get("profit")
-    pnl: float | None = None
-    if pnl_raw is not None:
-        try:
-            pnl = float(pnl_raw)
-        except (TypeError, ValueError):
-            pnl = None
-
-    res_price_raw = r.get("resolutionPrice") or r.get("resolvedPrice")
-    resolution_price: float | None = None
-    if res_price_raw is not None:
-        try:
-            resolution_price = float(res_price_raw)
-        except (TypeError, ValueError):
-            resolution_price = None
-
-    return Trade(
+    return Position(
         wallet_address=wallet_address,
-        market_id=market_id,
-        market_question=r.get("title") or r.get("question"),
-        side=side,
+        condition_id=condition_id,
+        asset=r.get("asset"),
+        title=r.get("title"),
+        slug=r.get("slug"),
         outcome=r.get("outcome"),
-        size=size,
-        price=price,
-        pnl=pnl,
-        is_resolved=bool(r.get("resolved", False)),
-        resolution_price=resolution_price,
-        timestamp=timestamp,
+        avg_price=_safe_float(r.get("avgPrice") or r.get("avg_price")),
+        size=_safe_float(r.get("size")),
+        initial_value=_safe_float(r.get("initialValue") or r.get("initial_value")),
+        current_value=_safe_float(r.get("currentValue") or r.get("current_value")),
+        cash_pnl=_safe_float(r.get("cashPnl") or r.get("cash_pnl")),
+        percent_pnl=_safe_float(r.get("percentPnl") or r.get("percent_pnl")),
+        total_bought=_safe_float(r.get("totalBought") or r.get("total_bought")),
+        realized_pnl=_safe_float(r.get("realizedPnl") or r.get("realized_pnl")),
+        percent_realized_pnl=_safe_float(r.get("percentRealizedPnl") or r.get("percent_realized_pnl")),
+        current_price=_safe_float(r.get("curPrice") or r.get("current_price")),
+        redeemable=bool(r.get("redeemable", False)),
+        end_date=end_date,
     )
 
 
@@ -97,18 +65,16 @@ def _parse_timestamp(raw: Any) -> datetime | None:
     if isinstance(raw, datetime):
         return raw
     if isinstance(raw, (int, float)):
-        # Assume Unix seconds; if it looks like milliseconds, convert
         val = float(raw)
         if val > 1e12:
             val /= 1000
         return datetime.utcfromtimestamp(val)
     if isinstance(raw, str):
-        for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%d %H:%M:%S"):
+        for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
             try:
                 return datetime.strptime(raw, fmt)
             except ValueError:
                 continue
-        # Last resort: try fromisoformat
         try:
             return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
         except ValueError:
@@ -116,145 +82,89 @@ def _parse_timestamp(raw: Any) -> datetime | None:
     return None
 
 
-# ── Metric computation (pure functions) ───────────────────────────────────────
-
-def compute_metrics(trades: list[Trade]) -> WalletMetrics | None:
-    """
-    Compute all statistics for a wallet's trade history.
-
-    Returns None if the trade list is empty.
-    Returns a WalletMetrics with None fields where data is insufficient —
-    never fabricates numbers from incomplete data (CLAUDE.md rule 5).
-    """
-    if not trades:
+def _safe_float(val: Any) -> float | None:
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
         return None
 
-    address = trades[0].wallet_address
-    trade_count = len(trades)
 
-    # Only count trades that have a known P&L outcome
-    completed = [t for t in trades if t.pnl is not None]
-    wins = [t for t in completed if t.pnl > 0]  # type: ignore[operator]
-    losses = [t for t in completed if t.pnl < 0]  # type: ignore[operator]
+# ── Metric computation (pure functions) ───────────────────────────────────────
 
-    win_count = len(wins)
-    loss_count = len(losses)
-    win_rate = win_count / len(completed) if completed else None
-    total_pnl = sum(t.pnl for t in completed) if completed else None  # type: ignore[misc]
-    total_volume = sum(t.size for t in trades) if trades else None
+def compute_metrics(
+    positions: list[Position],
+    leaderboard_pnl: float | None,
+    leaderboard_vol: float | None,
+    portfolio_value: float | None,
+) -> WalletMetrics | None:
+    """
+    Compute wallet statistics from positions + leaderboard data.
 
-    sharpe_ratio = _compute_sharpe(completed)
-    profit_factor = _compute_profit_factor(wins, losses)
-    avg_hold_time = _compute_avg_hold_time(trades)
-    exit_quality = _compute_exit_quality(completed)
+    Returns None if there are no positions.
+    total_pnl and total_volume come from the Polymarket leaderboard — authoritative.
+    """
+    if not positions:
+        return None
 
-    # Market concentration
-    market_counts: dict[str, int] = {}
-    for t in trades:
-        market_counts[t.market_id] = market_counts.get(t.market_id, 0) + 1
-    market_count = len(market_counts)
-    top_concentration = (
-        max(market_counts.values()) / trade_count if market_counts else None
-    )
+    address = positions[0].wallet_address
+    trade_count = len(positions)
+
+    realized_positions = [p for p in positions if p.redeemable]
+    unresolved_positions = [p for p in positions if not p.redeemable]
+
+    # Market concentration (by condition_id)
+    condition_ids = [p.condition_id for p in positions]
+    market_count = len(set(condition_ids))
+    condition_counts: dict[str, int] = {}
+    for cid in condition_ids:
+        condition_counts[cid] = condition_counts.get(cid, 0) + 1
+    top_concentration = max(condition_counts.values()) / trade_count if condition_counts else None
+
+    # Position size stats
+    sizes = [p.size for p in positions if p.size is not None and p.size > 0]
+    avg_position_size = float(np.mean(sizes)) if sizes else None
+
+    initial_values = [p.initial_value for p in positions if p.initial_value is not None]
+    max_position_size_usd = max(initial_values) if initial_values else None
+
+    # P&L concentration: top-3 by absolute cash_pnl / total cash_pnl
+    pct_pnl_from_top_3 = _compute_pct_pnl_top_3(positions)
 
     return WalletMetrics(
         wallet_address=address,
         trade_count=trade_count,
-        win_count=win_count,
-        loss_count=loss_count,
-        win_rate=win_rate,
-        total_pnl=total_pnl,
-        total_volume=total_volume,
-        sharpe_ratio=sharpe_ratio,
-        profit_factor=profit_factor,
-        avg_hold_time_hours=avg_hold_time,
-        exit_quality=exit_quality,
+        total_pnl=leaderboard_pnl,
+        total_volume=leaderboard_vol,
         market_count=market_count,
         top_market_concentration=top_concentration,
+        portfolio_value=portfolio_value,
+        realized_position_count=len(realized_positions),
+        unresolved_position_count=len(unresolved_positions),
+        avg_position_size=avg_position_size,
+        max_position_size_usd=max_position_size_usd,
+        pct_pnl_from_top_3_positions=pct_pnl_from_top_3,
         computed_at=datetime.utcnow(),
     )
 
 
-def _compute_sharpe(completed: list[Trade]) -> float | None:
-    """Annualised Sharpe ratio on per-trade returns. None if < SHARPE_MIN_TRADES."""
-    if len(completed) < SHARPE_MIN_TRADES:
-        return None  # Per CLAUDE.md rule 5 — never estimate from sparse data
-
-    returns = []
-    for t in completed:
-        if t.size and t.size > 0 and t.pnl is not None:
-            returns.append(t.pnl / t.size)
-
-    if len(returns) < 2:
+def _compute_pct_pnl_top_3(positions: list[Position]) -> float | None:
+    """
+    Concentration metric: sum of cashPnl from top-3-by-absolute-value positions
+    divided by total cashPnl. Returns None when total cashPnl is zero.
+    """
+    positions_with_pnl = [p for p in positions if p.cash_pnl is not None]
+    if not positions_with_pnl:
         return None
 
-    arr = np.array(returns, dtype=float)
-    std = float(np.std(arr, ddof=1))
-    if std == 0:
+    total_cash_pnl = sum(p.cash_pnl for p in positions_with_pnl)  # type: ignore[misc]
+    if total_cash_pnl == 0:
         return None
 
-    # Annualise assuming ~252 effective trading periods
-    return float(np.mean(arr) / std * np.sqrt(252))
-
-
-def _compute_profit_factor(wins: list[Trade], losses: list[Trade]) -> float | None:
-    gross_profit = sum(t.pnl for t in wins)  # type: ignore[misc]
-    gross_loss = abs(sum(t.pnl for t in losses))  # type: ignore[misc]
-    if gross_loss == 0:
-        return None  # Division by zero — not a valid metric without losses
-    return float(gross_profit / gross_loss)
-
-
-def _compute_avg_hold_time(trades: list[Trade]) -> float | None:
-    """
-    Estimate average hold time by pairing BUY and SELL records on the same market.
-    Returns hours. Returns None if no complete round-trips found.
-    """
-    # Group by market_id
-    buys: dict[str, list[datetime]] = {}
-    sells: dict[str, list[datetime]] = {}
-    for t in sorted(trades, key=lambda x: x.timestamp):
-        if t.side == "BUY":
-            buys.setdefault(t.market_id, []).append(t.timestamp)
-        elif t.side == "SELL":
-            sells.setdefault(t.market_id, []).append(t.timestamp)
-
-    hold_times: list[float] = []
-    for market_id, buy_times in buys.items():
-        sell_times = sells.get(market_id, [])
-        pairs = min(len(buy_times), len(sell_times))
-        for buy_ts, sell_ts in zip(buy_times[:pairs], sell_times[:pairs]):
-            delta = (sell_ts - buy_ts).total_seconds() / 3600
-            if delta >= 0:
-                hold_times.append(delta)
-
-    if not hold_times:
-        return None
-    return float(np.mean(hold_times))
-
-
-def _compute_exit_quality(completed: list[Trade]) -> float | None:
-    """
-    For resolved markets, measure how close to the final settlement price
-    the trader exited (or held to resolution).
-
-    exit_quality = 1.0 means they captured 100% of the available move;
-    lower values mean they left profit on the table.
-
-    Returns None when no resolution data is available.
-    """
-    scores: list[float] = []
-    for t in completed:
-        if t.resolution_price is None:
-            continue
-        if t.resolution_price == 0:
-            continue
-        # For a winning BUY, ideal exit = 1.0 (YES resolved); measure how close they got
-        captured_price = t.price if t.side == "SELL" else t.resolution_price
-        score = min(1.0, captured_price / t.resolution_price)
-        scores.append(score)
-
-    return float(np.mean(scores)) if scores else None
+    top_3 = sorted(positions_with_pnl, key=lambda p: abs(p.cash_pnl), reverse=True)[:3]  # type: ignore[arg-type]
+    top_3_pnl = sum(p.cash_pnl for p in top_3)  # type: ignore[misc]
+    return float(top_3_pnl / total_cash_pnl)
 
 
 # ── Hard filters ──────────────────────────────────────────────────────────────
@@ -262,32 +172,40 @@ def _compute_exit_quality(completed: list[Trade]) -> float | None:
 def apply_hard_filters(
     metrics_list: list[WalletMetrics],
     min_trades: int | None = None,
-    min_win_rate: float | None = None,
+    min_pnl: float | None = None,
     min_volume: float | None = None,
+    min_realized_positions: int | None = None,
 ) -> list[WalletMetrics]:
     """Return only wallets that pass the minimum quality thresholds."""
-    from config import MIN_TRADES, MIN_VOLUME_USD, MIN_WIN_RATE
+    from config import MIN_PNL, MIN_REALIZED_POSITIONS, MIN_TRADES, MIN_VOLUME_USD
 
     min_trades = min_trades if min_trades is not None else MIN_TRADES
-    min_win_rate = min_win_rate if min_win_rate is not None else MIN_WIN_RATE
+    min_pnl = min_pnl if min_pnl is not None else MIN_PNL
     min_volume = min_volume if min_volume is not None else MIN_VOLUME_USD
+    min_realized_positions = (
+        min_realized_positions if min_realized_positions is not None else MIN_REALIZED_POSITIONS
+    )
 
     passed = []
     for m in metrics_list:
         if m.trade_count < min_trades:
             continue
-        if m.win_rate is None or m.win_rate < min_win_rate:
+        if m.total_pnl is None or m.total_pnl < min_pnl:
             continue
         if m.total_volume is None or m.total_volume < min_volume:
+            continue
+        if m.realized_position_count < min_realized_positions:
             continue
         passed.append(m)
 
     logger.info(
-        "Hard filters: %d → %d wallets (trades≥%d, win_rate≥%.0f%%, volume≥$%.0f)",
+        "Hard filters: %d → %d wallets "
+        "(positions≥%d, pnl≥$%.0f, volume≥$%.0f, realized≥%d)",
         len(metrics_list),
         len(passed),
         min_trades,
-        min_win_rate * 100,
+        min_pnl,
         min_volume,
+        min_realized_positions,
     )
     return passed

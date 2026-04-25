@@ -17,44 +17,53 @@ class Wallet(SQLModel, table=True):
     is_watched: bool = Field(default=False)
 
 
-class Trade(SQLModel, table=True):
-    """Individual trade records fetched from the activity endpoint."""
+class Position(SQLModel, table=True):
+    """Per-position data fetched from the /positions endpoint.
 
-    __tablename__ = "trade"
+    redeemable=True means the market resolved and the position is redeemable (resolved).
+    """
+
+    __tablename__ = "position"
 
     id: Optional[int] = Field(default=None, primary_key=True)
     wallet_address: str = Field(index=True)
-    market_id: str = Field(index=True)
-    market_question: Optional[str] = Field(default=None)
-    side: str  # "BUY" or "SELL"
-    outcome: Optional[str] = Field(default=None)  # "Yes" or "No"
-    size: float  # USDC amount
-    price: float  # 0.0 – 1.0
-    pnl: Optional[float] = Field(default=None)  # None until resolved or sold
-    is_resolved: bool = Field(default=False)
-    resolution_price: Optional[float] = Field(default=None)
-    timestamp: datetime
+    condition_id: str = Field(index=True)
+    asset: Optional[str] = Field(default=None)
+    title: Optional[str] = Field(default=None)
+    slug: Optional[str] = Field(default=None)
+    outcome: Optional[str] = Field(default=None)
+    avg_price: Optional[float] = Field(default=None)
+    size: Optional[float] = Field(default=None)
+    initial_value: Optional[float] = Field(default=None)
+    current_value: Optional[float] = Field(default=None)
+    cash_pnl: Optional[float] = Field(default=None)
+    percent_pnl: Optional[float] = Field(default=None)
+    total_bought: Optional[float] = Field(default=None)
+    realized_pnl: Optional[float] = Field(default=None)
+    percent_realized_pnl: Optional[float] = Field(default=None)
+    current_price: Optional[float] = Field(default=None)
+    redeemable: bool = Field(default=False)
+    end_date: Optional[datetime] = Field(default=None)
     fetched_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class WalletMetrics(SQLModel, table=True):
-    """Computed statistics for a wallet, refreshed each scan."""
+    """Computed statistics for a wallet, derived from leaderboard + positions data."""
 
     __tablename__ = "walletmetrics"
 
     wallet_address: str = Field(primary_key=True)
-    trade_count: int = Field(default=0)
-    win_count: int = Field(default=0)
-    loss_count: int = Field(default=0)
-    win_rate: Optional[float] = Field(default=None)
-    total_pnl: Optional[float] = Field(default=None)
-    total_volume: Optional[float] = Field(default=None)
-    sharpe_ratio: Optional[float] = Field(default=None)  # None if < SHARPE_MIN_TRADES
-    profit_factor: Optional[float] = Field(default=None)
-    avg_hold_time_hours: Optional[float] = Field(default=None)
-    exit_quality: Optional[float] = Field(default=None)  # None if data unavailable
-    market_count: int = Field(default=0)
+    trade_count: int = Field(default=0)  # count of positions
+    total_pnl: Optional[float] = Field(default=None)  # from leaderboard
+    total_volume: Optional[float] = Field(default=None)  # from leaderboard
+    market_count: int = Field(default=0)  # distinct condition_ids in positions
     top_market_concentration: Optional[float] = Field(default=None)
+    portfolio_value: Optional[float] = Field(default=None)  # from /value endpoint
+    realized_position_count: int = Field(default=0)  # positions where redeemable=True
+    unresolved_position_count: int = Field(default=0)  # positions where redeemable=False
+    avg_position_size: Optional[float] = Field(default=None)  # mean of position.size
+    max_position_size_usd: Optional[float] = Field(default=None)  # max of initial_value
+    pct_pnl_from_top_3_positions: Optional[float] = Field(default=None)
     computed_at: datetime = Field(default_factory=datetime.utcnow)
 
 

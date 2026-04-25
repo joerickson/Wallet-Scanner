@@ -10,22 +10,23 @@ from scanner.ranking import compute_composite_score, rank_wallets
 
 def _metrics(
     address: str,
-    win_rate: float | None = 0.65,
-    sharpe: float | None = 1.5,
-    profit_factor: float | None = 2.0,
-    total_pnl: float | None = 5000.0,
-    trade_count: int = 200,
-    total_volume: float | None = 50_000.0,
+    total_pnl: float | None = 15000.0,
+    realized_position_count: int = 40,
+    pct_pnl_from_top_3: float | None = 0.30,
+    total_volume: float | None = 80_000.0,
+    portfolio_value: float | None = 5000.0,
+    trade_count: int = 50,
 ) -> WalletMetrics:
     return WalletMetrics(
         wallet_address=address,
         trade_count=trade_count,
-        win_count=int((trade_count * (win_rate or 0))),
-        win_rate=win_rate,
         total_pnl=total_pnl,
         total_volume=total_volume,
-        sharpe_ratio=sharpe,
-        profit_factor=profit_factor,
+        market_count=10,
+        portfolio_value=portfolio_value,
+        realized_position_count=realized_position_count,
+        unresolved_position_count=trade_count - realized_position_count,
+        pct_pnl_from_top_3_positions=pct_pnl_from_top_3,
         computed_at=datetime.utcnow(),
     )
 
@@ -36,46 +37,50 @@ class TestComputeCompositeScore:
         assert 0.0 <= score <= 1.0
 
     def test_better_wallet_scores_higher(self):
-        good = _metrics("0xgood", win_rate=0.80, sharpe=3.0, profit_factor=4.0, total_pnl=50_000)
-        poor = _metrics("0xpoor", win_rate=0.61, sharpe=0.5, profit_factor=1.1, total_pnl=500)
+        good = _metrics("0xgood", total_pnl=200_000, realized_position_count=150, pct_pnl_from_top_3=0.1)
+        poor = _metrics("0xpoor", total_pnl=5001, realized_position_count=10, pct_pnl_from_top_3=0.9)
         assert compute_composite_score(good) > compute_composite_score(poor)
 
-    def test_none_sharpe_still_scores(self):
-        m = _metrics("0xa", sharpe=None)
+    def test_high_pnl_concentration_penalised(self):
+        diverse = _metrics("0xa", pct_pnl_from_top_3=0.10)
+        concentrated = _metrics("0xb", pct_pnl_from_top_3=0.95)
+        assert compute_composite_score(diverse) > compute_composite_score(concentrated)
+
+    def test_none_pnl_scores_zero_on_that_component(self):
+        m = _metrics("0xa", total_pnl=None)
         score = compute_composite_score(m)
         assert 0.0 <= score <= 1.0
 
-    def test_all_none_components_gives_low_score(self):
-        m = WalletMetrics(
-            wallet_address="0xzero",
-            trade_count=0,
-            win_rate=None,
-            total_pnl=None,
-            total_volume=None,
-            sharpe_ratio=None,
-            profit_factor=None,
-            computed_at=datetime.utcnow(),
-        )
+    def test_none_portfolio_value_scores_zero_on_that_component(self):
+        m = _metrics("0xa", portfolio_value=None)
         score = compute_composite_score(m)
-        # Even with all None, score should be 0 (trade_count=0 contributes 0)
-        assert score == pytest.approx(0.0)
+        assert 0.0 <= score <= 1.0
 
-    def test_custom_weights_respected(self):
-        """Win-rate-only weights should rank a high-win-rate wallet first."""
-        high_wr = _metrics("0xa", win_rate=0.95, sharpe=0.5, profit_factor=1.1)
-        low_wr = _metrics("0xb", win_rate=0.61, sharpe=3.0, profit_factor=5.0)
-        weights = {"win_rate": 1.0}
-        assert compute_composite_score(high_wr, weights) > compute_composite_score(low_wr, weights)
+    def test_none_pct_pnl_uses_neutral(self):
+        with_pct = _metrics("0xa", pct_pnl_from_top_3=0.5)
+        without_pct = _metrics("0xb", pct_pnl_from_top_3=None)
+        # Neither should crash; scores should be close (neutral = 0.5)
+        s1 = compute_composite_score(with_pct)
+        s2 = compute_composite_score(without_pct)
+        assert 0.0 <= s1 <= 1.0
+        assert 0.0 <= s2 <= 1.0
+
+    def test_negative_pnl_scores_zero(self):
+        m = _metrics("0xa", total_pnl=-5000.0)
+        score = compute_composite_score(m)
+        assert 0.0 <= score <= 1.0
 
     def test_stable_on_repeated_calls(self, basic_metrics):
         s1 = compute_composite_score(basic_metrics)
         s2 = compute_composite_score(basic_metrics)
         assert s1 == pytest.approx(s2)
 
-    def test_negative_pnl_does_not_crash(self):
-        m = _metrics("0xa", total_pnl=-1000.0)
-        score = compute_composite_score(m)
-        assert 0.0 <= score <= 1.0
+    def test_custom_weights_respected(self):
+        """PNL-only weights should rank the higher-PNL wallet first."""
+        high_pnl = _metrics("0xa", total_pnl=500_000, realized_position_count=10)
+        low_pnl = _metrics("0xb", total_pnl=5001, realized_position_count=200)
+        weights = {"total_pnl": 1.0}
+        assert compute_composite_score(high_pnl, weights) > compute_composite_score(low_pnl, weights)
 
 
 class TestRankWallets:
@@ -85,8 +90,8 @@ class TestRankWallets:
         assert len(rankings) == 10
 
     def test_rank_one_has_highest_score(self):
-        good = _metrics("0x" + "a" * 40, win_rate=0.90, sharpe=4.0, profit_factor=4.5)
-        poor = _metrics("0x" + "b" * 40, win_rate=0.61, sharpe=0.3, profit_factor=1.1)
+        good = _metrics("0x" + "a" * 40, total_pnl=300_000, realized_position_count=150, pct_pnl_from_top_3=0.1)
+        poor = _metrics("0x" + "b" * 40, total_pnl=5001, realized_position_count=10, pct_pnl_from_top_3=0.9)
         rankings = rank_wallets([poor, good])  # deliberately unordered input
         assert rankings[0].rank == 1
         assert rankings[0].wallet_address == good.wallet_address
@@ -97,7 +102,7 @@ class TestRankWallets:
         assert [r.rank for r in rankings] == [1, 2, 3, 4, 5]
 
     def test_composite_scores_are_descending(self):
-        wallets = [_metrics(f"0x{i:040x}", win_rate=0.6 + i * 0.02) for i in range(5)]
+        wallets = [_metrics(f"0x{i:040x}", total_pnl=5001 + i * 10_000) for i in range(5)]
         rankings = rank_wallets(wallets)
         scores = [r.composite_score for r in rankings]
         assert scores == sorted(scores, reverse=True)

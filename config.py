@@ -28,11 +28,13 @@ CLAUDE_MAX_TOKENS: int = 1024
 API_RATE_LIMIT: float = float(os.getenv("API_RATE_LIMIT", "2.0"))  # req/sec
 
 # ── Hard scanner filters ──────────────────────────────────────────────────────
-MIN_TRADES: int = int(os.getenv("MIN_TRADES", "100"))
-MIN_WIN_RATE: float = float(os.getenv("MIN_WIN_RATE", "0.60"))
+# trade_count = number of positions (not /activity events)
+MIN_TRADES: int = int(os.getenv("MIN_TRADES", "30"))
+# Minimum P&L from leaderboard — direct skill signal from Polymarket
+MIN_PNL: float = float(os.getenv("MIN_PNL", "5000.0"))
 MIN_VOLUME_USD: float = float(os.getenv("MIN_VOLUME_USD", "5000.0"))
-# Per CLAUDE.md rule 5: Sharpe is None for wallets with fewer than this many trades
-SHARPE_MIN_TRADES: int = 90
+# Must have at least this many resolved positions to be evaluable
+MIN_REALIZED_POSITIONS: int = int(os.getenv("MIN_REALIZED_POSITIONS", "10"))
 
 # ── Claude review ─────────────────────────────────────────────────────────────
 # Never call Claude on the full population — only on post-filter top N
@@ -40,11 +42,11 @@ CLAUDE_REVIEW_TOP_N: int = int(os.getenv("CLAUDE_REVIEW_TOP_N", "200"))
 
 # ── Composite ranking weights ─────────────────────────────────────────────────
 RANKING_WEIGHTS: dict[str, float] = {
-    "win_rate": float(os.getenv("WEIGHT_WIN_RATE", "0.30")),
-    "sharpe": float(os.getenv("WEIGHT_SHARPE", "0.25")),
-    "profit_factor": float(os.getenv("WEIGHT_PROFIT_FACTOR", "0.20")),
-    "total_pnl": float(os.getenv("WEIGHT_TOTAL_PNL", "0.15")),
-    "trade_count": float(os.getenv("WEIGHT_TRADE_COUNT", "0.10")),
+    "total_pnl": float(os.getenv("WEIGHT_TOTAL_PNL", "0.40")),
+    "realized_position_count": float(os.getenv("WEIGHT_REALIZED_POSITIONS", "0.20")),
+    "pct_pnl_from_top_3_positions": float(os.getenv("WEIGHT_PCT_PNL_CONCENTRATION", "0.20")),
+    "total_volume": float(os.getenv("WEIGHT_TOTAL_VOLUME", "0.10")),
+    "portfolio_value": float(os.getenv("WEIGHT_PORTFOLIO_VALUE", "0.10")),
 }
 
 # ── Database ──────────────────────────────────────────────────────────────────
