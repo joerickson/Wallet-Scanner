@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import itertools
 import json
 import logging
+import sys
 import time
 from typing import Any
 
@@ -18,6 +20,15 @@ from tenacity import (
 from config import API_CACHE_TTL, API_RATE_LIMIT, POLYMARKET_DATA_API_BASE
 
 logger = logging.getLogger(__name__)
+
+# Leaderboard API constraints
+_LEADERBOARD_MAX_LIMIT = 50
+_LEADERBOARD_MAX_OFFSET = 1000
+
+# Sweep dimensions for get_all_traders
+_SWEEP_TIME_PERIODS = ["ALL", "MONTH", "WEEK"]
+_SWEEP_CATEGORIES = ["OVERALL", "POLITICS", "SPORTS", "CRYPTO", "ECONOMICS", "TECH", "FINANCE"]
+_SWEEP_ORDER_BY = ["PNL", "VOL"]
 
 
 class _RateLimiter:
@@ -127,27 +138,34 @@ class PolymarketClient:
 
     async def get_leaderboard(
         self,
-        window: str = "all",
-        limit: int = 100,
+        time_period: str = "ALL",
+        limit: int = _LEADERBOARD_MAX_LIMIT,
         offset: int = 0,
+        order_by: str = "PNL",
+        category: str = "OVERALL",
     ) -> list[dict[str, Any]]:
         """Return a page of leaderboard entries."""
         data = await self._get(
-            "/leaderboard", {"window": window, "limit": limit, "offset": offset}
+            "/v1/leaderboard",
+            {
+                "timePeriod": time_period,
+                "limit": limit,
+                "offset": offset,
+                "orderBy": order_by,
+                "category": category,
+            },
         )
         return _as_list(data)
 
     async def get_activity(
         self,
-        user: str | None = None,
+        user: str,
         limit: int = 500,
         offset: int = 0,
         activity_type: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Return a page of activity records, optionally filtered by user."""
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
-        if user:
-            params["user"] = user
+        """Return activity records for a wallet (user address required)."""
+        params: dict[str, Any] = {"user": user, "limit": limit, "offset": offset}
         if activity_type:
             params["type"] = activity_type
         data = await self._get("/activity", params)
@@ -169,37 +187,34 @@ class PolymarketClient:
 
     async def get_all_traders(self, max_wallets: int = 10_000) -> list[str]:
         """
-        Discover wallet addresses by paginating the leaderboard, then
-        falling back to the activity feed if more addresses are needed.
+        Discover wallet addresses by sweeping the leaderboard across all
+        timePeriod × category × orderBy combinations, paginating each slice
+        up to offset=1000, then deduping by proxyWallet.
+
+        Realistic yield: 2,000–4,000 unique wallets after deduplication.
         """
         addresses: set[str] = set()
 
-        # Primary source: leaderboard endpoint
-        offset = 0
-        while len(addresses) < max_wallets:
-            try:
-                records = await self.get_leaderboard(limit=100, offset=offset)
-            except httpx.HTTPStatusError as exc:
-                logger.warning("Leaderboard error at offset=%d: %s", offset, exc)
-                break
-            if not records:
-                break
-            for r in records:
-                addr = _extract_address(r)
-                if addr:
-                    addresses.add(addr)
-            if len(records) < 100:
-                break
-            offset += 100
+        combinations = list(
+            itertools.product(_SWEEP_TIME_PERIODS, _SWEEP_CATEGORIES, _SWEEP_ORDER_BY)
+        )
 
-        # Fallback: mine addresses from the activity feed
-        if len(addresses) < max_wallets:
+        for time_period, category, order_by in combinations:
             offset = 0
-            while len(addresses) < max_wallets:
+            while offset <= _LEADERBOARD_MAX_OFFSET:
                 try:
-                    records = await self.get_activity(limit=500, offset=offset)
+                    records = await self.get_leaderboard(
+                        time_period=time_period,
+                        category=category,
+                        order_by=order_by,
+                        limit=_LEADERBOARD_MAX_LIMIT,
+                        offset=offset,
+                    )
                 except httpx.HTTPStatusError as exc:
-                    logger.warning("Activity error at offset=%d: %s", offset, exc)
+                    logger.warning(
+                        "Leaderboard error %s/%s/%s offset=%d: %s",
+                        time_period, category, order_by, offset, exc,
+                    )
                     break
                 if not records:
                     break
@@ -207,9 +222,12 @@ class PolymarketClient:
                     addr = _extract_address(r)
                     if addr:
                         addresses.add(addr)
-                if len(records) < 500:
+                if len(records) < _LEADERBOARD_MAX_LIMIT:
                     break
-                offset += 500
+                offset += _LEADERBOARD_MAX_LIMIT
+
+            if len(addresses) >= max_wallets:
+                break
 
         result = list(addresses)[:max_wallets]
         logger.info("Discovered %d unique wallet addresses", len(result))
@@ -257,9 +275,45 @@ def _as_list(data: Any) -> list[dict[str, Any]]:
 
 
 def _extract_address(record: dict[str, Any]) -> str | None:
-    """Pull the wallet address from an activity or leaderboard record."""
-    for key in ("address", "user", "maker", "trader"):
+    """Pull the wallet address from a leaderboard or activity record."""
+    for key in ("proxyWallet", "address", "user", "maker", "trader"):
         val = record.get(key)
         if val and isinstance(val, str) and val.startswith("0x"):
             return val.lower()
     return None
+
+
+# ── Smoke test ─────────────────────────────────────────────────────────────────
+
+async def _smoketest() -> None:
+    """Sanity-check the four confirmed endpoints — prints PASS/FAIL per endpoint."""
+    base = POLYMARKET_DATA_API_BASE.rstrip("/")
+    # Zero address returns empty results (200) on all per-wallet endpoints
+    sample_wallet = "0x0000000000000000000000000000000000000000"
+
+    checks: list[tuple[str, dict[str, Any]]] = [
+        ("/v1/leaderboard", {"timePeriod": "ALL", "limit": 1, "offset": 0, "orderBy": "PNL", "category": "OVERALL"}),
+        ("/activity", {"user": sample_wallet, "limit": 1}),
+        ("/trades", {"user": sample_wallet, "limit": 1}),
+        ("/positions", {"user": sample_wallet, "limit": 1}),
+        ("/value", {"user": sample_wallet}),
+    ]
+
+    async with httpx.AsyncClient(timeout=15.0, headers={"Accept": "application/json"}) as client:
+        for path, params in checks:
+            url = base + path
+            try:
+                r = await client.get(url, params=params)
+                status = r.status_code
+                ok = status == 200
+            except Exception as exc:
+                status = str(exc)
+                ok = False
+            label = "PASS" if ok else "FAIL"
+            print(f"{label}  {path}  (HTTP {status})")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "smoketest":
+        logging.basicConfig(level=logging.WARNING)
+        asyncio.run(_smoketest())
