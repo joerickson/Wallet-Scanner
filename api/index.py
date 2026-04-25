@@ -17,8 +17,11 @@ _security = HTTPBasic()
 _DASHBOARD_USER = os.getenv("DASHBOARD_USER", "")
 _DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "")
 
-# Initialize DB tables on cold start
-init_db()
+# Initialize DB tables on cold start (no-op if DB is unavailable)
+try:
+    init_db()
+except Exception:
+    pass
 
 
 def _auth(creds: HTTPBasicCredentials = Depends(_security)) -> None:
