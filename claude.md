@@ -10,23 +10,21 @@ The dashboard MAY be deployed to a personal hosting environment (Vercel, Railway
 
 - **Not a trading bot.** No buy/sell execution layer. No wallet connections for write operations. No private keys are ever loaded, stored, or referenced.
 - **Not a multi-tenant SaaS.** No signup flow, no public users table, no per-user data isolation, no billing. The deployment, if any, serves exactly one person (the owner).
-- **Not a public product.** Any deployed surface is access-controlled (basic auth, IP allowlist, Cloudflare Access, single-user token, or similar). It is not crawlable, not indexable, not advertised.
 - **Not an investment recommendation engine.** It surfaces information. Decisions are the owner's.
 
-If a task asks for any of the above, stop and ask the user before proceeding.
+If a task asks for any of the above, stop and ask the owner before proceeding.
 
 ## Deployment guidance
 
 The owner runs this in three possible modes:
+
 - **Local CLI** — `python main.py scan` from the laptop. The default development workflow.
 - **Personal VPS daemon** — for the alerts poller running 24/7. Single VPS, owner-controlled.
-- **Personal hosted dashboard** — a small web view of the leaderboard and alerts, hosted on Vercel / Railway / Fly / equivalent, accessible only to the owner.
+- **Personal hosted dashboard** — a small web view of the leaderboard and alerts, hosted on Vercel / Railway / Fly / equivalent.
 
-Hosting the dashboard is allowed and encouraged for accessibility. The dashboard MUST:
-- Be access-controlled (basic auth via env vars, Cloudflare Access, Vercel password protection, or similar — no anonymous access)
-- Read from the same SQLite database the scanner writes to (file storage on Vercel via a mounted volume or external storage like Turso/LibSQL is fine)
-- Display only — no trade execution, no key handling, no order placement
-- Have NO public signup, NO user management, NO multi-tenancy
+Access control on the hosted dashboard is the owner's call, not a project rule. Options range from "none — the URL is the secret" to HTTP basic auth to Cloudflare Access to Vercel's built-in protection. All are acceptable. The owner decides based on their threat model.
+
+The dashboard MUST display only — no trade execution, no key handling, no order placement. How access is gated, if at all, is owner discretion.
 
 If hosting on Vercel, the dashboard layer can be a thin FastAPI or Flask app, OR a small Next.js read-only frontend that calls a Python API — Claude should ask the owner which they prefer before adding a web layer.
 
@@ -48,7 +46,7 @@ If hosting on Vercel, the dashboard layer can be a thin FastAPI or Flask app, OR
 ### Hosted dashboard (optional, if owner chooses to deploy)
 - **FastAPI** for a thin read-only API serving the SQLite data
 - **Next.js + Tailwind** if the owner wants a polished mobile-friendly web view, OR plain Jinja2 templates served from FastAPI for a simpler stack
-- Authentication via Vercel password protection, Cloudflare Access, or HTTP basic auth — owner picks
+- Authentication is optional and is the owner's call
 
 Do not add Postgres unless the dataset outgrows SQLite (very unlikely for single-user). Do not add Docker unless the owner asks. Do not add Redis or a job queue — async Python with `asyncio.create_task` is sufficient at this scale.
 
@@ -137,8 +135,8 @@ When adding new functionality, prefer extending an existing module over creating
 
 1. **No trading execution layer.** Not now, not later. Push back if asked.
 2. **No private key handling.** The project never loads, stores, or transmits keys.
-3. **No public multi-tenant features.** No signup, no public users, no billing. Single-user only.
-4. **Any hosted dashboard MUST be access-controlled.** Basic auth, Cloudflare Access, Vercel password protection, or equivalent. Never publicly accessible.
+3. **No public multi-tenancy.** Single-user only — no signup, no users table, no billing.
+4. **Access control on the deployed dashboard is owner discretion.** Not a project mandate. Implement what the owner asks for, nothing more, nothing less.
 5. **No fabricated metrics.** If a wallet has fewer than 90 trades, Sharpe is `None`, not estimated.
 6. **Never call Claude on the full wallet population.** Numerical filters first, Claude on top 200 only.
 7. **Never silently overwrite cached data.** Cache writes include timestamps; reads check freshness.
@@ -152,8 +150,7 @@ When adding new functionality, prefer extending an existing module over creating
 - sqlmodel: https://sqlmodel.tiangolo.com/
 - textual: https://textual.textualize.io/
 - FastAPI: https://fastapi.tiangolo.com/
-- Vercel password protection: https://vercel.com/docs/security/deployment-protection
 
 ## When in doubt
 
-Ask. Scope discipline matters — but accessibility for the owner (mobile dashboard, hosted alerts) is a feature, not a violation.
+Ask the owner. Scope discipline matters, but the owner decides what's in scope. When the owner makes a call that contradicts a previous instruction here, follow the owner — and update this file accordingly.board, hosted alerts) is a feature, not a violation.
