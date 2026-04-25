@@ -98,7 +98,7 @@ python main.py scan
 ```
 
 Runs the complete pipeline: discover wallets → fetch trades → compute metrics → rank →
-Claude review top 200. Expects ≤30 minutes for 10 000 wallets.
+Claude review top 200. Expects ≤30 minutes for the full wallet universe.
 
 ```bash
 python main.py scan --incremental
@@ -238,7 +238,17 @@ Claude qualitative review is called only on the top 200 wallets after numerical 
 |---|---|---|
 | `claude-sonnet-4-20250514` | 200 | ~$0.50–1.50 |
 
-A full weekly refresh of 10 000 wallets should cost well under $4 in Claude API usage.
+A full weekly refresh should cost well under $4 in Claude API usage.
+
+---
+
+## Realistic expectations
+
+The Polymarket Data API leaderboard caps each slice at offset=1000 with a maximum of 50 results per page. To build the widest possible wallet universe, the scanner sweeps multiple combinations of `timePeriod` (ALL, MONTH, WEEK), `category` (OVERALL, POLITICS, SPORTS, CRYPTO, ECONOMICS, TECH, FINANCE), and `orderBy` (PNL, VOL), then deduplicates by `proxyWallet`.
+
+**Realistic wallet universe: 2,000–4,000 unique addresses** after full deduplication across all sweep dimensions.
+
+Filtering this down to the top ~50 wallets with consistent, risk-adjusted skill is still meaningful at this scale. Early claims of 14,000+ addressable wallets were unverifiable and not reproducible via the official API.
 
 ---
 
