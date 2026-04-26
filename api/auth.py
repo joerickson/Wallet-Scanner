@@ -56,7 +56,7 @@ async def validate_session(request: Request) -> Optional[dict]:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(
                 f"{NEON_AUTH_BASE_URL}/get-session",
-                headers={"Cookie": f"__Secure-neon-auth.session_token={token}"},
+                headers={"Authorization": f"Bearer {token}"},
             )
     except Exception:
         return None
@@ -64,10 +64,18 @@ async def validate_session(request: Request) -> Optional[dict]:
     if response.status_code != 200:
         raise HTTPException(status_code=401, detail={"error": "Authentication required"})
 
-    # Log the raw response shape once so we can confirm which key path Neon is using.
     global _logged_response_shape
     if not _logged_response_shape:
-        logger.info("Neon /get-session raw response: %s", response.text)
+        # Log status and top-level keys once to confirm response shape without leaking token values.
+        try:
+            body_summary = list(response.json().keys()) if response.content else None
+        except Exception:
+            body_summary = "<unparseable>"
+        logger.info(
+            "Neon /get-session first response: status=%s body_keys=%s",
+            response.status_code,
+            body_summary,
+        )
         _logged_response_shape = True
 
     parsed = response.json() if response.content else None
