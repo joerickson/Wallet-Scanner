@@ -13,9 +13,16 @@ logger = logging.getLogger(__name__)
 # Normalisation bounds
 _REALIZED_POSITIONS_BOUNDS = (0.0, 200.0)
 _PCT_PNL_BOUNDS = (0.0, 1.0)
-_PNL_MAX_LOG = np.log1p(500_000)      # normalise up to $500k
-_VOLUME_MAX_LOG = np.log1p(1_000_000)  # normalise up to $1M
-_PORTFOLIO_VALUE_MAX_LOG = np.log1p(100_000)  # normalise up to $100k
+_PNL_MAX_LOG: float = float(np.log1p(500_000))      # normalise up to $500k
+_VOLUME_MAX_LOG: float = float(np.log1p(1_000_000))  # normalise up to $1M
+_PORTFOLIO_VALUE_MAX_LOG: float = float(np.log1p(100_000))  # normalise up to $100k
+
+
+def _to_python_number(value: object) -> object:
+    """Coerce numpy scalars to native Python numbers before DB writes."""
+    if hasattr(value, "item"):  # numpy scalars expose .item()
+        return value.item()
+    return value
 
 
 def _normalise(value: float, low: float, high: float) -> float:
@@ -80,7 +87,7 @@ def compute_composite_score(
             weighted_sum += components[key] * weight
             total_weight += weight
 
-    return weighted_sum / total_weight if total_weight > 0 else 0.0
+    return float(weighted_sum / total_weight) if total_weight > 0 else 0.0
 
 
 def rank_wallets(
@@ -107,7 +114,7 @@ def rank_wallets(
         rankings.append(
             WalletRanking(
                 wallet_address=metrics.wallet_address,
-                composite_score=score,
+                composite_score=float(score),
                 rank=rank,
                 ranked_at=now,
             )
