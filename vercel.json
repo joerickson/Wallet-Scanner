@@ -1,4 +1,6 @@
 {
+  "version": 2,
+  "buildCommand": "cd dashboard && npm install && npm run build",
   "builds": [
     {
       "src": "api/index.py",
@@ -8,7 +10,7 @@
           "api/**",
           "data/**",
           "scanner/**",
-          "dashboard/**",
+          "dashboard/dist/**",
           "config.py"
         ]
       }

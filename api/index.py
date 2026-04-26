@@ -6,7 +6,8 @@ import uuid
 from datetime import datetime
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from api.auth import AUTH_ENABLED, NEON_AUTH_BASE_URL, require_auth
 from config import STRATEGY_REGEN_DAILY_LIMIT
@@ -15,30 +16,12 @@ from scanner import repository as repo
 
 app = FastAPI(title="Wallet Scanner", docs_url=None, redoc_url=None)
 
-_DASHBOARD_HTML = pathlib.Path(__file__).parent.parent / "dashboard" / "index.html"
-_LOGIN_HTML = pathlib.Path(__file__).parent.parent / "dashboard" / "login.html"
+_DIST_DIR = pathlib.Path(__file__).parent.parent / "dashboard" / "dist"
 
 try:
     init_db()
 except Exception:
     pass
-
-
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    # Auth is validated client-side via JWT in localStorage.
-    try:
-        return _DASHBOARD_HTML.read_text()
-    except FileNotFoundError:
-        return HTMLResponse("<p>Dashboard not found.</p>", status_code=404)
-
-
-@app.get("/login", response_class=HTMLResponse)
-async def login_page():
-    try:
-        return _LOGIN_HTML.read_text()
-    except FileNotFoundError:
-        return HTMLResponse("<p>Login page not found.</p>", status_code=404)
 
 
 @app.get("/api/config")
@@ -377,3 +360,24 @@ async def wallet_detail(address: str, user: dict = Depends(require_auth)) -> dic
             "computed_at": metrics.computed_at.isoformat(),
         } if metrics else None,
     }
+
+
+# ── Static assets and SPA fallback ───────────────────────────────────────────
+# Mount /assets only when the dist directory has been built.
+# All non-API GET requests fall through to the React SPA's index.html.
+
+if _DIST_DIR.exists() and (_DIST_DIR / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(_DIST_DIR / "assets")), name="assets")
+
+
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str) -> FileResponse:
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404)
+    index = _DIST_DIR / "index.html"
+    if index.exists():
+        return FileResponse(str(index))
+    return HTMLResponse(  # type: ignore[return-value]
+        "<p>Frontend not built. Run: <code>cd dashboard && npm run build</code></p>",
+        status_code=503,
+    )
