@@ -49,13 +49,14 @@ RANKING_WEIGHTS: dict[str, float] = {
     "portfolio_value": float(os.getenv("WEIGHT_PORTFOLIO_VALUE", "0.10")),
 }
 
-# ── Neon Auth / Stack Auth ────────────────────────────────────────────────────
-# Configure these in Neon console → Auth → API Keys.  When all three are set,
-# the API requires OAuth sign-in via Google or GitHub.  Leave blank for local
+# ── Neon Auth (Better Auth) ───────────────────────────────────────────────────
+# Set NEON_AUTH_BASE_URL to the "Auth URL" from Neon Console → Auth → Configuration.
+# When set, the API requires OAuth sign-in via Google.  Leave blank for local
 # development — auth is disabled and the app is open with a "local-dev" user.
-STACK_PROJECT_ID: str = os.getenv("STACK_PROJECT_ID", "")
-STACK_PUBLISHABLE_CLIENT_KEY: str = os.getenv("STACK_PUBLISHABLE_CLIENT_KEY", "")
-STACK_SECRET_SERVER_KEY: str = os.getenv("STACK_SECRET_SERVER_KEY", "")
+NEON_AUTH_BASE_URL: str = os.getenv("NEON_AUTH_BASE_URL", "")
+# 32+ char random secret used to validate sessions.  Generate with:
+#   openssl rand -base64 32
+NEON_AUTH_COOKIE_SECRET: str = os.getenv("NEON_AUTH_COOKIE_SECRET", "")
 
 # ── Database ──────────────────────────────────────────────────────────────────
 DATA_DIR: Path = Path(__file__).parent / "data"

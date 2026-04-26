@@ -45,8 +45,8 @@ async def login_page(request: Request):
 
 @app.get("/api/auth/login")
 async def auth_login(request: Request, provider: str = "google"):
-    if provider not in ("google", "github"):
-        raise HTTPException(status_code=400, detail="Provider must be 'google' or 'github'")
+    if provider not in ("google",):
+        raise HTTPException(status_code=400, detail="Provider must be 'google'")
     return await start_oauth(request, provider)
 
 
@@ -57,8 +57,7 @@ async def auth_callback(request: Request):
 
 @app.get("/api/auth/signout")
 async def auth_signout(request: Request):
-    is_secure = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
-    return signout_response(is_secure=is_secure)
+    return await signout_response(request)
 
 
 @app.get("/api/auth/me")
