@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -9,6 +10,8 @@ from data.database import init_db
 from scanner import repository as repo
 
 app = FastAPI(title="Wallet Scanner", docs_url=None, redoc_url=None)
+
+_DASHBOARD_HTML = pathlib.Path(__file__).parent.parent / "dashboard" / "index.html"
 
 # Initialize DB tables on cold start (no-op if DB is unavailable)
 try:
@@ -19,29 +22,47 @@ except Exception:
 
 @app.get("/", response_class=HTMLResponse)
 def root() -> str:
-    return "<meta http-equiv='refresh' content='0; url=/api/leaderboard'>"
+    try:
+        return _DASHBOARD_HTML.read_text()
+    except FileNotFoundError:
+        return "<p>Dashboard not found.</p>"
 
 
 @app.get("/api/leaderboard")
-def leaderboard(limit: int = 50) -> list[dict]:
+def leaderboard(limit: int = 50) -> dict:
     rows = repo.get_top_rankings(limit=min(limit, 200))
-    result = []
+    total = repo.get_rankings_count()
+    max_ranked_at = max((r.ranked_at for r in rows), default=None)
+
+    wallets = []
     for r in rows:
         metrics = repo.get_metrics_for_wallet(r.wallet_address)
-        flags: list[str] = []
-        for field in (r.heuristic_red_flags, r.claude_red_flags):
-            if field:
-                try:
-                    flags += json.loads(field)
-                except json.JSONDecodeError:
-                    pass
-        result.append({
+
+        heuristic_flags: list[str] = []
+        if r.heuristic_red_flags:
+            try:
+                heuristic_flags = json.loads(r.heuristic_red_flags)
+            except json.JSONDecodeError:
+                pass
+
+        claude_flags: list[str] = []
+        if r.claude_red_flags:
+            try:
+                claude_flags = json.loads(r.claude_red_flags)
+            except json.JSONDecodeError:
+                pass
+
+        wallets.append({
             "address": r.wallet_address,
             "rank": r.rank,
             "composite_score": r.composite_score,
             "skill_signal": r.skill_signal,
             "edge_hypothesis": r.edge_hypothesis,
-            "red_flags": flags,
+            "claude_notes": r.claude_notes,
+            "ranked_at": r.ranked_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "heuristic_red_flags": heuristic_flags,
+            "claude_red_flags": claude_flags,
+            "red_flags": heuristic_flags + claude_flags,
             "metrics": {
                 "trade_count": metrics.trade_count,
                 "total_pnl": metrics.total_pnl,
@@ -53,7 +74,15 @@ def leaderboard(limit: int = 50) -> list[dict]:
                 "pct_pnl_from_top_3_positions": metrics.pct_pnl_from_top_3_positions,
             } if metrics else None,
         })
-    return result
+
+    return {
+        "meta": {
+            "total": total,
+            "showing": len(wallets),
+            "last_ranked_at": max_ranked_at.strftime("%Y-%m-%dT%H:%M:%SZ") if max_ranked_at else None,
+        },
+        "wallets": wallets,
+    }
 
 
 @app.get("/api/alerts")
