@@ -11,6 +11,7 @@ from data.database import get_engine
 from data.schema import (
     Alert,
     Position,
+    UserWatchlist,
     Wallet,
     WalletMetrics,
     WalletRanking,
@@ -227,6 +228,54 @@ def update_watched_positions(address: str, positions_json: str) -> None:
         w.last_position_check = datetime.utcnow()
         s.add(w)
         s.commit()
+
+
+# ── User watchlist ────────────────────────────────────────────────────────────
+
+def get_user_watchlist(user_id: str) -> list[UserWatchlist]:
+    with _session() as s:
+        stmt = select(UserWatchlist).where(UserWatchlist.user_id == user_id)
+        return list(s.exec(stmt).all())
+
+
+def get_watched_addresses_for_user(user_id: str) -> set[str]:
+    with _session() as s:
+        stmt = select(UserWatchlist.wallet_address).where(UserWatchlist.user_id == user_id)
+        return set(s.exec(stmt).all())
+
+
+def add_user_watchlist_entry(user_id: str, wallet_address: str) -> bool:
+    """Return True if added, False if already exists."""
+    with _session() as s:
+        existing = s.exec(
+            select(UserWatchlist).where(
+                UserWatchlist.user_id == user_id,
+                UserWatchlist.wallet_address == wallet_address,
+            )
+        ).first()
+        if existing:
+            return False
+        if not s.get(Wallet, wallet_address):
+            s.add(Wallet(address=wallet_address))
+        s.add(UserWatchlist(user_id=user_id, wallet_address=wallet_address))
+        s.commit()
+        return True
+
+
+def remove_user_watchlist_entry(user_id: str, wallet_address: str) -> bool:
+    """Return True if removed, False if not found."""
+    with _session() as s:
+        entry = s.exec(
+            select(UserWatchlist).where(
+                UserWatchlist.user_id == user_id,
+                UserWatchlist.wallet_address == wallet_address,
+            )
+        ).first()
+        if not entry:
+            return False
+        s.delete(entry)
+        s.commit()
+        return True
 
 
 # ── Alerts ────────────────────────────────────────────────────────────────────

@@ -81,6 +81,19 @@ per-position resolution data including `redeemable` (TRUE = market resolved),
 
 ---
 
+## Accessing the hosted dashboard
+
+The dashboard at [predictionscanner.io](https://predictionscanner.io) requires sign-in via Google or GitHub.
+
+1. Visit `https://predictionscanner.io` — you will be redirected to the sign-in page.
+2. Click **Sign in with Google** or **Sign in with GitHub**.
+3. After OAuth, you land on the leaderboard. Your session is stored in an httpOnly cookie and persists for 30 days.
+4. To sign out, click **Sign out** in the top-right corner.
+
+For access issues contact the owner directly.
+
+---
+
 ## Setup
 
 ### Requirements
@@ -192,6 +205,9 @@ All settings live in `.env` (see `.env.example`):
 |---|---|---|
 | `ANTHROPIC_API_KEY` | *(required)* | Anthropic API key |
 | `DATABASE_URL` | *(optional)* | Neon Postgres connection string; omit to use local SQLite |
+| `STACK_PROJECT_ID` | *(optional)* | Neon Auth project ID — leave blank for local dev (auth disabled) |
+| `STACK_PUBLISHABLE_CLIENT_KEY` | *(optional)* | Neon Auth publishable key (`pk_...`) |
+| `STACK_SECRET_SERVER_KEY` | *(optional)* | Neon Auth secret server key (`sk_...`) |
 | `POLYMARKET_DATA_API_BASE` | `https://data-api.polymarket.com` | Override for testing |
 | `API_RATE_LIMIT` | `2.0` | Requests/second cap |
 | `MIN_TRADES` | `30` | Hard filter — minimum position count |

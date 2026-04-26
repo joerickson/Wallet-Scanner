@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -113,3 +114,18 @@ class Alert(SQLModel, table=True):
     price: Optional[float] = Field(default=None)
     details: Optional[str] = Field(default=None)  # JSON blob for extra context
     alerted_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class UserWatchlist(SQLModel, table=True):
+    """Per-user watchlist entries referencing neon_auth.users_sync by user_id."""
+
+    __tablename__ = "user_watchlist"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(index=True)  # id from neon_auth.users_sync
+    wallet_address: str = Field(foreign_key="wallet.address", index=True)
+    added_at: datetime = Field(default_factory=datetime.utcnow)
+    notes: Optional[str] = Field(default=None)
+    last_seen_at: datetime = Field(default_factory=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "wallet_address"),)

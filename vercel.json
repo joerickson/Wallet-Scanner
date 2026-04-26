@@ -5,6 +5,7 @@
       "use": "@vercel/python",
       "config": {
         "includeFiles": [
+          "api/**",
           "data/**",
           "scanner/**",
           "dashboard/**",
