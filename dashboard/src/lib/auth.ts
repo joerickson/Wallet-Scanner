@@ -9,36 +9,31 @@ export interface UserSession {
   };
 }
 
-function parseJwt(token: string): Record<string, unknown> | null {
-  try {
-    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(window.atob(base64));
-  } catch {
-    return null;
-  }
-}
-
 export function getToken(): string | null {
   return localStorage.getItem('auth_token');
 }
 
+function persistUser(user: Record<string, unknown>): void {
+  localStorage.setItem(
+    'auth_user',
+    JSON.stringify({
+      id: String(user['id'] || ''),
+      email: String(user['email'] || ''),
+      ...(user['name'] ? { name: String(user['name']) } : {}),
+    }),
+  );
+}
+
 export function getSession(): UserSession | null {
-  const token = getToken();
-  if (!token) return null;
-  const payload = parseJwt(token);
-  if (!payload) return null;
-  if (payload['exp'] && (payload['exp'] as number) * 1000 < Date.now()) {
-    localStorage.removeItem('auth_token');
+  const token = localStorage.getItem('auth_token');
+  const userRaw = localStorage.getItem('auth_user');
+  if (!token || !userRaw) return null;
+  try {
+    const user = JSON.parse(userRaw) as { id: string; email: string; name?: string };
+    return { token, user };
+  } catch {
     return null;
   }
-  return {
-    token,
-    user: {
-      id: String(payload['sub'] || ''),
-      email: String(payload['email'] || ''),
-      name: payload['name'] ? String(payload['name']) : undefined,
-    },
-  };
 }
 
 export function isAuthConfigured(): boolean {
@@ -47,6 +42,7 @@ export function isAuthConfigured(): boolean {
 
 export function signOut(): void {
   localStorage.removeItem('auth_token');
+  localStorage.removeItem('auth_user');
 }
 
 export async function signInEmail(email: string, password: string): Promise<void> {
@@ -61,6 +57,8 @@ export async function signInEmail(email: string, password: string): Promise<void
   const token = data['token'] as string | undefined;
   if (!token) throw new Error('No token returned from authentication service');
   localStorage.setItem('auth_token', token);
+  const user = data['user'] as Record<string, unknown> | undefined;
+  if (user) persistUser(user);
 }
 
 export async function signUpEmail(email: string, password: string, name: string): Promise<void> {
@@ -75,6 +73,8 @@ export async function signUpEmail(email: string, password: string, name: string)
   const token = data['token'] as string | undefined;
   if (!token) throw new Error('No token returned from authentication service');
   localStorage.setItem('auth_token', token);
+  const user = data['user'] as Record<string, unknown> | undefined;
+  if (user) persistUser(user);
 }
 
 export async function signInSocialRedirectUrl(
@@ -103,6 +103,10 @@ export async function handleOAuthCallback(): Promise<boolean> {
       const token = ((session && session['token']) || data['token']) as string | undefined;
       if (token) {
         localStorage.setItem('auth_token', token);
+        const user = (data['user'] || (session && session['user'])) as
+          | Record<string, unknown>
+          | undefined;
+        if (user) persistUser(user);
         return true;
       }
     }
