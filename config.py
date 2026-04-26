@@ -49,6 +49,14 @@ RANKING_WEIGHTS: dict[str, float] = {
     "portfolio_value": float(os.getenv("WEIGHT_PORTFOLIO_VALUE", "0.10")),
 }
 
+# ── Neon Auth / Stack Auth ────────────────────────────────────────────────────
+# Configure these in Neon console → Auth → API Keys.  When all three are set,
+# the API requires OAuth sign-in via Google or GitHub.  Leave blank for local
+# development — auth is disabled and the app is open with a "local-dev" user.
+STACK_PROJECT_ID: str = os.getenv("STACK_PROJECT_ID", "")
+STACK_PUBLISHABLE_CLIENT_KEY: str = os.getenv("STACK_PUBLISHABLE_CLIENT_KEY", "")
+STACK_SECRET_SERVER_KEY: str = os.getenv("STACK_SECRET_SERVER_KEY", "")
+
 # ── Database ──────────────────────────────────────────────────────────────────
 DATA_DIR: Path = Path(__file__).parent / "data"
 try:

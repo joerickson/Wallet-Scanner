@@ -40,11 +40,33 @@
 
     header { margin-bottom: 20px; }
 
+    .header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
     header h1 {
       font-size: 18px;
       font-weight: 600;
       letter-spacing: -0.01em;
     }
+
+    .header-user {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .header-user a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+    .header-user a:hover { text-decoration: underline; }
 
     .header-meta {
       display: flex;
@@ -59,6 +81,19 @@
       content: ' · ';
       margin: 0 4px;
     }
+
+    /* ── Watch button ─────────────────────────────────────────────── */
+
+    .watch-btn {
+      font-size: 12px;
+      background: none;
+      border: none;
+      color: var(--blue);
+      cursor: pointer;
+      padding: 0;
+    }
+    .watch-btn:hover { text-decoration: underline; }
+    .watch-btn.watching { color: var(--muted); }
 
     /* ── Table wrapper ────────────────────────────────────────── */
 
@@ -317,7 +352,10 @@
 <body>
   <div id="app">
     <header>
-      <h1>Wallet Scanner</h1>
+      <div class="header-top">
+        <h1>Wallet Scanner</h1>
+        <div class="header-user" id="user-info"></div>
+      </div>
       <div class="header-meta" id="meta"></div>
     </header>
     <main id="main">
@@ -352,6 +390,31 @@
     let sortKey = 'rank';
     let sortDir = 'asc';
     let openAddr = null;
+
+    // ── Watch toggle ──────────────────────────────────────────────────────────
+
+    async function watchToggle(e, addr) {
+      e.stopPropagation();
+      const w = wallets.find(x => x.address === addr);
+      if (!w) return;
+      const watching = w.is_watched;
+      try {
+        if (watching) {
+          await fetch('/api/watchlist/' + addr, { method: 'DELETE' });
+          w.is_watched = false;
+        } else {
+          await fetch('/api/watchlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ wallet_address: addr }),
+          });
+          w.is_watched = true;
+        }
+        render();
+      } catch (err) {
+        showToast('Watchlist update failed');
+      }
+    }
 
     // ── Formatting ────────────────────────────────────────────────────────────
 
@@ -590,6 +653,9 @@
             <div class="detail-actions">
               <a class="action-link" href="https://polymarket.com/profile/${w.address}" target="_blank" rel="noopener noreferrer">View on Polymarket ↗</a>
               <button class="action-link" onclick="copyAddr(event,'${w.address}')">Copy full address</button>
+              <button class="watch-btn${w.is_watched ? ' watching' : ''}" onclick="watchToggle(event,'${w.address}')">
+                ${w.is_watched ? '★ Watching' : '☆ Watch'}
+              </button>
             </div>
           </div>
         </td>
@@ -615,8 +681,23 @@
     // ── Init ──────────────────────────────────────────────────────────────────
 
     async function init() {
+      // Load user info for the header (non-blocking)
+      fetch('/api/auth/me').then(r => {
+        if (r.ok) return r.json();
+      }).then(me => {
+        if (!me) return;
+        const email = me.email || me.name || 'you';
+        document.getElementById('user-info').innerHTML =
+          `<span>Signed in as ${esc(email)}</span>` +
+          `<a href="/api/auth/signout">Sign out</a>`;
+      }).catch(() => {});
+
       try {
         const res = await fetch('/api/leaderboard?limit=50');
+        if (res.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
 
