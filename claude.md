@@ -7,7 +7,7 @@ Research tool for analyzing Polymarket wallets. Identifies skilled traders by co
 - Python 3.11+, FastAPI on Vercel serverless
 - React + Vite + TypeScript frontend (in `dashboard/` — built to static assets, served by FastAPI)
 - Postgres via Neon (`DATABASE_URL`), Launch tier for storage headroom
-- Neon Auth (Better Auth) for authentication — JWT-based
+- Neon Auth (Better Auth) for authentication — opaque session tokens
 - Anthropic Claude for qualitative analysis (model: `claude-sonnet-4-5-20250929` or current best Sonnet)
 - Voyage AI for embeddings if/when RAG features are added (`voyage-3`)
 - GitHub Actions for scheduled scans (Mondays 06:00 UTC, 5h timeout, `--incremental`)
@@ -22,7 +22,7 @@ Research tool for analyzing Polymarket wallets. Identifies skilled traders by co
 
 **Backend (FastAPI on Vercel)**
 - API routes under `/api/*` — leaderboard, watchlist CRUD, strategy analysis, regeneration, health
-- Validates JWTs via PyJWT against Neon Auth's JWKS endpoint
+- Validates opaque session tokens by proxying to Neon Auth's `/get-session` endpoint
 - No `/api/auth/*` proxy routes — the frontend talks to Neon Auth directly
 - DB access via SQLModel + psycopg2-binary
 
@@ -60,7 +60,7 @@ Research tool for analyzing Polymarket wallets. Identifies skilled traders by co
 - Frontend handles all auth flows directly via the Neon Auth SDK
 - Backend never proxies auth requests
 - Backend validates the JWT on every protected endpoint via `Depends(get_current_user)`
-- `get_current_user()` is in `api/auth.py`; uses PyJWKClient against `{NEON_AUTH_BASE_URL}/.well-known/jwks.json`
+- `require_auth()` is in `api/auth.py`; sends the bearer token as `__Secure-neon-auth.session_token` cookie to `{NEON_AUTH_BASE_URL}/get-session`, with a 60 s in-memory cache keyed by SHA256(token)
 - `/api/health` is the only public endpoint; everything else is auth-protected
 
 ## Tone and scope
