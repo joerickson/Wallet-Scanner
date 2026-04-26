@@ -165,30 +165,36 @@ When adding new functionality, prefer extending an existing module over creating
 - textual: https://textual.textualize.io/
 - FastAPI: https://fastapi.tiangolo.com/
 
-## Auth (Neon Auth / Stack Auth)
+## Auth (Neon Auth — Better Auth backend)
 
-The hosted dashboard requires Google or GitHub OAuth via Neon Auth (built on Stack Auth).
+The hosted dashboard uses Google OAuth via **Neon Auth**, which is powered by Better Auth.
+**Do NOT use legacy Stack Auth** (`@stackframe/stack`, `api.stack-auth.com`, `STACK_*` vars) — those are not configured for this project and will 404.
 
 ### How it works
 
-1. User visits `/` → FastAPI checks for `ws_session` cookie → if missing/invalid, redirects to `/login`.
-2. `/login` page shows Google and GitHub sign-in buttons (links to `/api/auth/login?provider=google|github`).
-3. `api/auth.py` initiates a PKCE OAuth2 flow against the Stack Auth REST API (`https://api.stack-auth.com/api/v1`).
-4. After OAuth, Stack Auth redirects to `/api/auth/callback` with an authorization code.
-5. FastAPI exchanges the code for an access token and stores it in a 30-day httpOnly cookie (`ws_session`).
-6. Every protected endpoint calls `validate_session()` which hits `GET /api/v1/users/me` on Stack Auth to verify the token.
+1. User visits `/` → FastAPI checks the `better-auth.session_token` cookie → if missing/invalid, redirects to `/login`.
+2. `/login` page shows a "Sign in with Google" button (link to `/api/auth/login?provider=google`).
+3. `api/auth.py` calls `POST {NEON_AUTH_BASE_URL}/api/auth/sign-in/social` to get the Google OAuth redirect URL.
+4. After Google OAuth, Neon Auth handles the callback and redirects the browser to `/api/auth/callback` on our app.
+5. FastAPI validates the session by forwarding the `better-auth.session_token` cookie to `GET {NEON_AUTH_BASE_URL}/api/auth/get-session`.
+6. Every protected endpoint calls `validate_session()` which hits the Neon Auth session endpoint.
 
 ### Required Vercel env vars
 
 | Variable | Where to find |
 |---|---|
-| `STACK_PROJECT_ID` | Neon console → Auth → API Keys |
-| `STACK_PUBLISHABLE_CLIENT_KEY` | Neon console → Auth → API Keys (starts with `pk_`) |
-| `STACK_SECRET_SERVER_KEY` | Neon console → Auth → API Keys (starts with `sk_`) |
+| `NEON_AUTH_BASE_URL` | Neon Console → Auth → Configuration → Auth URL |
+| `NEON_AUTH_COOKIE_SECRET` | Generate with `openssl rand -base64 32` |
 
 ### Local development
 
-Leave all three `STACK_*` vars unset. `AUTH_ENABLED` in `api/auth.py` will be `False`, and every request is treated as a synthetic `local-dev` user. No OAuth flow is triggered.
+Leave both `NEON_AUTH_*` vars unset. `AUTH_ENABLED` in `api/auth.py` will be `False`, and every request is treated as a synthetic `local-dev` user. No OAuth flow is triggered.
+
+### OAuth providers currently enabled
+
+- **Email** — default
+- **Google** — via Neon Auth shared keys (default)
+- **GitHub** — NOT yet enabled. To add it: Neon Console → Auth → Configuration → OAuth providers.
 
 ### Protected routes
 
@@ -196,7 +202,14 @@ All `/api/*` routes except `/api/health` require a valid session. The GitHub Act
 
 ### User-scoped data
 
-User identity comes from the `id` field in the Stack Auth user object (a UUID, stable per provider account). This is stored as `user_id` in the `user_watchlist` table. User records are managed entirely by Neon Auth (`neon_auth.users_sync` schema); we store only the `id` reference.
+User identity comes from the `id` field returned by Neon Auth's get-session endpoint (a string UUID from Better Auth, stable per provider account). This is stored as `user_id` in the `user_watchlist` table. User records are managed by Neon Auth in the `neon_auth.user` schema; we store only the `id` reference.
+
+### Post-deploy checklist
+
+After deploying to Vercel:
+1. Add `NEON_AUTH_BASE_URL` and `NEON_AUTH_COOKIE_SECRET` to Vercel env vars.
+2. Add `predictionscanner.io` to trusted domains: Neon Console → Auth → Configuration → Domains.
+3. Redeploy and test the Google sign-in flow.
 
 ## Scheduled scans
 

@@ -120,12 +120,12 @@ class Alert(SQLModel, table=True):
 
 
 class UserWatchlist(SQLModel, table=True):
-    """Per-user watchlist entries referencing neon_auth.users_sync by user_id."""
+    """Per-user watchlist entries referencing neon_auth.user by user_id."""
 
     __tablename__ = "user_watchlist"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: str = Field(index=True)  # id from neon_auth.users_sync
+    user_id: str = Field(index=True)  # id from neon_auth.user (Better Auth)
     wallet_address: str = Field(foreign_key="wallet.address", index=True)
     added_at: datetime = Field(default_factory=datetime.utcnow)
     notes: Optional[str] = Field(default=None)
