@@ -236,6 +236,27 @@
     }
     .rank.bold { color: var(--text); font-weight: 700; }
 
+    /* ── Deep indicator (top-10 rows) ────────────────────────── */
+
+    .deep-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 14px;
+      height: 14px;
+      margin-left: 5px;
+      border-radius: 50%;
+      background: rgba(88,166,255,0.15);
+      border: 1px solid rgba(88,166,255,0.35);
+      cursor: default;
+      vertical-align: middle;
+      flex-shrink: 0;
+    }
+
+    .deep-icon svg {
+      display: block;
+    }
+
     /* ── Wallet ───────────────────────────────────────────────── */
 
     .addr-btn {
@@ -416,6 +437,438 @@
     }
     #toast.show { opacity: 1; transform: translateY(0); }
 
+    /* ── Deep Analysis Section ────────────────────────────────── */
+
+    .da-section {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .da-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .da-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 0;
+    }
+
+    .da-timestamp {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .da-regen-btn {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: none;
+      color: var(--blue);
+      cursor: pointer;
+      margin-left: auto;
+      transition: background 0.1s, border-color 0.1s;
+    }
+    .da-regen-btn:hover:not(:disabled) { background: rgba(88,166,255,0.08); border-color: var(--blue); }
+    .da-regen-btn:disabled { opacity: 0.5; cursor: default; }
+
+    .da-inline-msg {
+      font-size: 11px;
+      color: var(--muted);
+      margin-left: auto;
+      font-style: italic;
+    }
+
+    .da-rate-limit {
+      font-size: 11px;
+      color: var(--yellow);
+      margin-left: auto;
+    }
+
+    .da-error-msg {
+      font-size: 12px;
+      color: var(--red);
+      padding: 6px 0;
+    }
+
+    /* At-a-glance cards */
+    .da-cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .da-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+
+    .da-card-label {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+
+    .da-card-value {
+      font-size: 18px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+    }
+
+    .da-replicable-yes { color: var(--green); }
+    .da-replicable-no  { color: var(--red);   }
+
+    .da-conf {
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--muted);
+      margin-left: 3px;
+    }
+
+    .da-strategy-badge {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+      background: rgba(88,166,255,0.12);
+      color: var(--blue);
+    }
+
+    /* Blueprint */
+    .da-subsection {
+      margin-bottom: 14px;
+    }
+
+    .da-subsection-title {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 7px;
+      font-weight: 600;
+    }
+
+    .da-blueprint {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 5px 12px;
+    }
+
+    .da-blueprint dt {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      padding-top: 1px;
+    }
+
+    .da-blueprint dd {
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    /* Performance estimates */
+    .da-perf {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .da-perf-item {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .da-perf-label {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .da-perf-value {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Risks — collapsible */
+    .da-risks {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 14px;
+    }
+
+    .da-risks summary {
+      cursor: pointer;
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      user-select: none;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .da-risks summary::-webkit-details-marker { display: none; }
+
+    .da-risks summary::before {
+      content: '▶';
+      font-size: 8px;
+      transition: transform 0.15s;
+      display: inline-block;
+    }
+    .da-risks[open] summary::before { transform: rotate(90deg); }
+
+    .da-risks-body {
+      padding: 0 12px 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    .da-risks h3 {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 10px 0 5px;
+    }
+
+    .da-risks ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .da-risks li {
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.55;
+      margin-bottom: 3px;
+    }
+
+    /* Full thesis */
+    .da-thesis {
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.7;
+    }
+
+    .da-thesis p + p { margin-top: 8px; }
+
+    /* Paper trade recommendation callout */
+    .da-callout {
+      margin-top: 10px;
+      padding: 10px 12px;
+      background: rgba(63,185,80,0.07);
+      border: 1px solid rgba(63,185,80,0.25);
+      border-radius: 6px;
+    }
+
+    .da-callout-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--green);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 5px;
+    }
+
+    .da-callout-body {
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    /* Skeleton */
+    .da-skeleton {
+      animation: da-pulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes da-pulse {
+      0%, 100% { opacity: 0.55; }
+      50%       { opacity: 0.25; }
+    }
+
+    .da-skel-block {
+      background: var(--border);
+      border-radius: 4px;
+    }
+
+    /* Empty state */
+    .da-empty {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 4px 0 8px;
+    }
+
+    .da-generate-btn {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 4px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: none;
+      color: var(--green);
+      cursor: pointer;
+      transition: background 0.1s, border-color 0.1s;
+    }
+    .da-generate-btn:hover:not(:disabled) {
+      background: rgba(63,185,80,0.08);
+      border-color: var(--green);
+    }
+    .da-generate-btn:disabled { opacity: 0.5; cursor: default; }
+
+    /* Placeholder for rank 11+ */
+    .da-placeholder-msg {
+      font-size: 12px;
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    /* History */
+    .da-history-link {
+      font-size: 11px;
+      color: var(--blue);
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 0;
+      margin-top: 10px;
+      display: inline-block;
+    }
+    .da-history-link:hover { text-decoration: underline; }
+
+    .da-history-list {
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .da-history-item {
+      padding: 8px 12px;
+      font-size: 11px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .da-history-item:last-child { border-bottom: none; }
+    .da-history-item strong { color: var(--text); }
+
+    /* ── Strategies Tab ───────────────────────────────────────── */
+
+    .strat-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 20px;
+      margin-bottom: 14px;
+      align-items: flex-start;
+    }
+
+    .strat-filter-group {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+
+    .strat-filter-label {
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+      font-weight: 500;
+    }
+
+    .strat-pill {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 10px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: none;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s, border-color 0.1s;
+      white-space: nowrap;
+    }
+    .strat-pill:hover { color: var(--text); border-color: #444c56; }
+    .strat-pill.active {
+      background: var(--blue);
+      color: #0d1117;
+      border-color: var(--blue);
+    }
+
+    .strategies-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .strategy-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .sc-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+
+    .sc-rank {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      min-width: 28px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .sc-addr {
+      font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+      font-size: 12px;
+      color: var(--blue);
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 0;
+    }
+    .sc-addr:hover { text-decoration: underline; }
+
+    .sc-pnl {
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      margin-left: auto;
+    }
+
+    .sc-body {
+      padding: 14px;
+    }
+
     /* ── Mobile ───────────────────────────────────────────────── */
 
     @media (max-width: 700px) {
@@ -423,6 +876,7 @@
       .col-vol, .col-skill { display: none; }
       .edge { max-width: 120px; }
       .detail-metrics { grid-template-columns: repeat(2, 1fr); }
+      .da-cards { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -468,23 +922,50 @@
     let sortKey = 'rank';
     let sortDir = 'asc';
     let openAddr = null;
-    let viewFilter = 'all'; // 'all' | 'watchlist' | 'new_activity'
+    let viewFilter = 'all'; // 'all' | 'watchlist' | 'new_activity' | 'strategies'
     let watchlistSummary = null;
+    let currentUser = null;
+
+    // Strategy data for expanded detail rows (cleared on each fresh open)
+    const strategyData    = new Map(); // addr -> analysis object | null (404)
+    const strategyLoading = new Set(); // addrs currently fetching
+    const strategyError   = new Map(); // addr -> error string
+
+    // Regen state per address
+    const regenState = new Map(); // addr -> {loading, jobId, pollTimerId, error, rateLimited}
+
+    // History per address
+    const historyData    = new Map(); // addr -> array
+    const historyLoading = new Set();
+    const historyError   = new Map();
+    const historyExpanded = new Set();
+
+    // Strategies tab
+    const stratTabData    = new Map(); // addr -> analysis | null
+    const stratTabLoading = new Set();
+    const stratTabError   = new Map();
+    let stratTabFetched   = false;
+    let stratTypeFilter   = 'all';
+    let stratReplFilter   = 'all';
 
     // ── Filtering ─────────────────────────────────────────────────────────────
 
     function setFilter(f) {
       viewFilter = f;
+      if (f === 'strategies' && !stratTabFetched) {
+        loadStrategiesTab();
+      }
       render();
     }
 
     function getFiltered() {
       if (viewFilter === 'watchlist')    return wallets.filter(w => w.is_watched);
       if (viewFilter === 'new_activity') return wallets.filter(w => w.is_watched && w.new_activity_count > 0);
+      if (viewFilter === 'strategies')   return wallets.filter(w => w.rank <= 10);
       return wallets;
     }
 
-    // ── Watchlist summary (local recompute after mutations) ───────────────────
+    // ── Watchlist summary ─────────────────────────────────────────────────────
 
     function computeLocalSummary() {
       const watched = wallets.filter(w => w.is_watched);
@@ -554,6 +1035,10 @@
 
     function fmtPct(v) {
       return v == null ? '–' : (v * 100).toFixed(1) + '%';
+    }
+
+    function fmtPctDirect(v) {
+      return v == null ? '–' : (v * 100).toFixed(0) + '%';
     }
 
     function shortAddr(a) {
@@ -644,7 +1129,7 @@
       render();
     }
 
-    // ── Toggle detail (marks wallet seen when expanded) ───────────────────────
+    // ── Toggle detail ─────────────────────────────────────────────────────────
 
     function toggle(addr) {
       const wasOpen = openAddr === addr;
@@ -652,8 +1137,9 @@
 
       if (!wasOpen) {
         const w = wallets.find(x => x.address === addr);
+
+        // Mark watched wallet as seen
         if (w && w.is_watched && (w.new_activity_count || 0) > 0) {
-          const prevCount = w.new_activity_count;
           fetch('/api/watchlist/' + addr + '/seen', { method: 'POST' })
             .then(() => {
               w.new_activity_count = 0;
@@ -662,8 +1148,123 @@
             })
             .catch(() => {});
         }
+
+        // Fetch strategy for top-10 wallets on every expand (always fresh)
+        if (w && w.rank <= 10) {
+          strategyData.delete(addr);
+          strategyError.delete(addr);
+          strategyLoading.add(addr);
+          render();
+          fetchStrategy(addr, strategyData, strategyLoading, strategyError);
+          return;
+        }
+      } else {
+        // Clear cached strategy data when closing so next open is always fresh
+        strategyData.delete(addr);
+        strategyError.delete(addr);
+        regenState.delete(addr);
+        historyExpanded.delete(addr);
       }
 
+      render();
+    }
+
+    // ── Strategy fetching ─────────────────────────────────────────────────────
+
+    function fetchStrategy(addr, dataMap, loadingSet, errorMap) {
+      fetch('/api/wallet/' + addr + '/strategy')
+        .then(res => {
+          if (res.status === 404) { dataMap.set(addr, null); return; }
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json().then(d => dataMap.set(addr, d));
+        })
+        .catch(e => errorMap.set(addr, e.message || 'Failed to load'))
+        .finally(() => { loadingSet.delete(addr); render(); });
+    }
+
+    // ── Strategies tab loading ────────────────────────────────────────────────
+
+    function loadStrategiesTab() {
+      stratTabFetched = true;
+      const top10 = wallets.filter(w => w.rank <= 10);
+      top10.forEach(w => {
+        stratTabLoading.add(w.address);
+        fetchStrategy(w.address, stratTabData, stratTabLoading, stratTabError);
+      });
+    }
+
+    // ── Regenerate ────────────────────────────────────────────────────────────
+
+    function startRegen(e, addr) {
+      e.stopPropagation();
+      const existing = regenState.get(addr);
+      if (existing && existing.loading) return;
+
+      regenState.set(addr, { loading: true, jobId: null, pollTimerId: null, error: null, rateLimited: false });
+      render();
+
+      fetch('/api/wallet/' + addr + '/strategy/regenerate', { method: 'POST' })
+        .then(res => {
+          if (res.status === 429) {
+            regenState.set(addr, { loading: false, jobId: null, pollTimerId: null, error: null, rateLimited: true });
+            render();
+            return;
+          }
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json().then(data => {
+            const timerId = setInterval(() => pollRegenJob(addr), 5000);
+            regenState.set(addr, { loading: true, jobId: data.job_id, pollTimerId: timerId, error: null, rateLimited: false });
+            render();
+          });
+        })
+        .catch(e => {
+          regenState.set(addr, { loading: false, jobId: null, pollTimerId: null, error: e.message || 'Request failed', rateLimited: false });
+          render();
+        });
+    }
+
+    function pollRegenJob(addr) {
+      const state = regenState.get(addr);
+      if (!state || !state.jobId) return;
+
+      fetch('/api/jobs/' + state.jobId)
+        .then(res => res.json())
+        .then(data => {
+          if (data.status === 'complete') {
+            clearInterval(state.pollTimerId);
+            if (data.result) {
+              strategyData.set(addr, data.result);
+              stratTabData.set(addr, data.result);
+            }
+            regenState.set(addr, { loading: false, jobId: null, pollTimerId: null, error: null, rateLimited: false });
+            render();
+          } else if (data.status === 'error') {
+            clearInterval(state.pollTimerId);
+            regenState.set(addr, { loading: false, jobId: null, pollTimerId: null, error: data.error || 'Analysis failed', rateLimited: false });
+            render();
+          }
+        })
+        .catch(() => {});
+    }
+
+    // ── History ───────────────────────────────────────────────────────────────
+
+    function toggleHistory(e, addr) {
+      e.stopPropagation();
+      if (historyExpanded.has(addr)) {
+        historyExpanded.delete(addr);
+        render();
+        return;
+      }
+      historyExpanded.add(addr);
+      if (!historyData.has(addr) && !historyLoading.has(addr)) {
+        historyLoading.add(addr);
+        fetch('/api/wallet/' + addr + '/strategy/history')
+          .then(res => res.ok ? res.json() : Promise.reject('HTTP ' + res.status))
+          .then(data => { historyData.set(addr, data); })
+          .catch(e => { historyError.set(addr, String(e)); })
+          .finally(() => { historyLoading.delete(addr); render(); });
+      }
       render();
     }
 
@@ -694,6 +1295,14 @@
         return `<th class="${classes}"${click}>${c.label}</th>`;
       }).join('') + '</tr>';
     }
+
+    // ── Deep icon SVG ─────────────────────────────────────────────────────────
+
+    const DEEP_ICON_SVG = `<svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true" focusable="false">
+      <circle cx="4" cy="3" r="2" fill="#58a6ff"/>
+      <rect x="2.5" y="5" width="3" height="1" rx="0.5" fill="#58a6ff"/>
+      <rect x="3.5" y="6" width="1" height="1.5" rx="0.5" fill="#58a6ff"/>
+    </svg>`;
 
     // ── Build data row ────────────────────────────────────────────────────────
 
@@ -733,8 +1342,12 @@
         </div>
       </td>`;
 
+      const deepIcon = w.rank <= 10
+        ? `<span class="deep-icon" title="Deep strategy analysis available — tap to view" role="img" aria-label="Deep strategy analysis available">${DEEP_ICON_SVG}</span>`
+        : '';
+
       return `<tr class="row${openAddr === w.address ? ' open' : ''}" onclick="toggle('${w.address}')">
-        <td><span class="rank${w.rank <= 10 ? ' bold' : ''}">#${w.rank}</span></td>
+        <td><span class="rank${w.rank <= 10 ? ' bold' : ''}">#${w.rank}${deepIcon}</span></td>
         ${watchCell}
         <td><button class="addr-btn" title="${esc(w.address)}" onclick="copyAddr(event,'${w.address}')">${shortAddr(w.address)}</button></td>
         <td><span class="${pc}">${fmtPnl(pnl)}</span></td>
@@ -744,6 +1357,221 @@
         <td><span class="edge" title="${esc(edge)}">${esc(edgeTrunc) || '<span class="neu">–</span>'}</span></td>
         <td><div class="flags">${flags.length ? flags.map(f => pill(f)).join('') : '<span class="neu" style="font-size:12px">–</span>'}</div></td>
       </tr>`;
+    }
+
+    // ── Build deep analysis content ───────────────────────────────────────────
+
+    function buildDeepSkeleton() {
+      return `<div class="da-skeleton" role="status" aria-label="Loading strategy analysis">
+        <div class="da-header">
+          <div class="da-skel-block" style="width:130px;height:14px"></div>
+          <div class="da-skel-block" style="width:90px;height:11px;margin-left:8px"></div>
+        </div>
+        <div class="da-cards">
+          <div class="da-skel-block" style="height:60px"></div>
+          <div class="da-skel-block" style="height:60px"></div>
+          <div class="da-skel-block" style="height:60px"></div>
+        </div>
+        <div class="da-skel-block" style="height:80px;margin-bottom:10px"></div>
+        <div class="da-skel-block" style="height:50px"></div>
+      </div>`;
+    }
+
+    function buildRegenControls(addr, regen) {
+      if (!currentUser) return '';
+      if (regen && regen.rateLimited) {
+        return `<span class="da-rate-limit" role="alert" aria-live="polite">
+          You've hit the daily regeneration limit (5 per day). Resets at midnight UTC.
+        </span>`;
+      }
+      if (regen && regen.loading) {
+        return `<span class="da-inline-msg" role="status" aria-live="polite">Analyzing… this may take 30–60 seconds</span>`;
+      }
+      if (regen && regen.error) {
+        return `<span class="da-rate-limit" role="alert">${esc(regen.error)}</span>`;
+      }
+      return `<button class="da-regen-btn" onclick="startRegen(event,'${addr}')"
+        aria-label="Regenerate strategy analysis for wallet ${addr}">Regenerate</button>`;
+    }
+
+    function buildDeepAnalysisEmpty(addr, regen) {
+      const isLoading = regen && regen.loading;
+      return `<div class="da-header">
+        <h2 class="da-title">Strategy Analysis</h2>
+        ${buildRegenControls(addr, regen)}
+      </div>
+      <p class="da-empty">Strategy analysis hasn't been generated yet for this wallet.</p>
+      ${!isLoading && currentUser ? `<button class="da-generate-btn" onclick="startRegen(event,'${addr}')"
+        aria-label="Generate strategy analysis for wallet ${addr}">Generate Now</button>` : ''}`;
+    }
+
+    function buildDeepAnalysisFull(addr, d, regen) {
+      // At-a-glance cards
+      const replicableClass = d.is_replicable ? 'da-replicable-yes' : 'da-replicable-no';
+      const replicableText  = d.is_replicable ? 'YES' : 'NO';
+      const confText = d.replicability_confidence != null
+        ? `<span class="da-conf">${fmtPctDirect(d.replicability_confidence)}</span>` : '';
+
+      const cards = `<div class="da-cards" aria-label="Strategy at a glance">
+        <div class="da-card">
+          <div class="da-card-label">Replicable?</div>
+          <div class="da-card-value ${replicableClass}">${replicableText}${confText}</div>
+        </div>
+        <div class="da-card">
+          <div class="da-card-label">Strategy Type</div>
+          <div class="da-card-value" style="font-size:14px;padding-top:3px">
+            <span class="da-strategy-badge">${esc(d.strategy_type || '–')}</span>
+            ${d.strategy_subtype ? `<span class="da-conf">${esc(d.strategy_subtype)}</span>` : ''}
+          </div>
+        </div>
+        <div class="da-card">
+          <div class="da-card-label">Min Capital</div>
+          <div class="da-card-value" style="font-size:16px">${d.capital_required_min_usd != null ? fmtUsd(d.capital_required_min_usd) : '–'}</div>
+        </div>
+      </div>`;
+
+      // Replication blueprint
+      const blueprint = `<div class="da-subsection">
+        <div class="da-subsection-title">Replication Blueprint</div>
+        <dl class="da-blueprint">
+          <dt>Entry Signal</dt>
+          <dd>${esc(d.entry_signal || '–')}</dd>
+          <dt>Exit Signal</dt>
+          <dd>${esc(d.exit_signal || '–')}</dd>
+          <dt>Position Sizing</dt>
+          <dd>${esc(d.position_sizing_rule || '–')}</dd>
+          <dt>Market Selection</dt>
+          <dd>${esc(d.market_selection_criteria || '–')}</dd>
+          <dt>Infrastructure</dt>
+          <dd>${esc(d.infrastructure_required || '–')}</dd>
+        </dl>
+      </div>`;
+
+      // Performance estimates (only if any non-null)
+      let perf = '';
+      const hasPerf = d.estimated_hit_rate != null || d.estimated_avg_hold_time_hours != null || d.estimated_sharpe_proxy != null;
+      if (hasPerf) {
+        const items = [];
+        if (d.estimated_hit_rate != null)
+          items.push(`<div class="da-perf-item"><div class="da-perf-label">Hit Rate</div><div class="da-perf-value">${fmtPctDirect(d.estimated_hit_rate)}</div></div>`);
+        if (d.estimated_avg_hold_time_hours != null)
+          items.push(`<div class="da-perf-item"><div class="da-perf-label">Avg Hold Time</div><div class="da-perf-value">${d.estimated_avg_hold_time_hours.toFixed(1)} hr</div></div>`);
+        if (d.estimated_sharpe_proxy != null)
+          items.push(`<div class="da-perf-item"><div class="da-perf-label">Sharpe Proxy</div><div class="da-perf-value">${d.estimated_sharpe_proxy.toFixed(2)}</div></div>`);
+        perf = `<div class="da-subsection">
+          <div class="da-subsection-title">Performance Estimates</div>
+          <div class="da-perf">${items.join('')}</div>
+        </div>`;
+      }
+
+      // Risks (collapsible)
+      const failures  = Array.isArray(d.failure_modes)  ? d.failure_modes  : [];
+      const riskItems = Array.isArray(d.risk_factors)   ? d.risk_factors   : [];
+      let risks = '';
+      if (failures.length || riskItems.length) {
+        const failuresHtml = failures.length
+          ? `<h3>Failure Modes</h3><ul>${failures.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : '';
+        const riskHtml = riskItems.length
+          ? `<h3>Risk Factors</h3><ul>${riskItems.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : '';
+        risks = `<details class="da-risks">
+          <summary>Risks</summary>
+          <div class="da-risks-body">${failuresHtml}${riskHtml}</div>
+        </details>`;
+      }
+
+      // Full thesis + callout
+      let thesis = '';
+      if (d.full_thesis) {
+        const paragraphs = d.full_thesis.split(/\n\n+/).map(p => `<p>${esc(p.trim())}</p>`).join('');
+        thesis = `<div class="da-subsection">
+          <div class="da-subsection-title">Full Thesis</div>
+          <div class="da-thesis">${paragraphs}</div>
+        </div>`;
+      }
+
+      let callout = '';
+      if (d.paper_trade_recommendation) {
+        callout = `<div class="da-callout" role="note">
+          <div class="da-callout-label">Paper Trade Recommendation</div>
+          <div class="da-callout-body">${esc(d.paper_trade_recommendation)}</div>
+        </div>`;
+      }
+
+      // History link
+      const histExpanded = historyExpanded.has(addr);
+      const histHtml = buildHistorySection(addr);
+      const histLink = `<button class="da-history-link" onclick="toggleHistory(event,'${addr}')">
+        ${histExpanded ? 'Hide analysis history' : 'View analysis history'}
+      </button>`;
+
+      return `<div class="da-header">
+        <h2 class="da-title">Strategy Analysis</h2>
+        <span class="da-timestamp">Last analyzed: ${timeAgo(d.generated_at)}</span>
+        ${buildRegenControls(addr, regen)}
+      </div>
+      ${cards}
+      ${blueprint}
+      ${perf}
+      ${risks}
+      ${thesis}
+      ${callout}
+      ${histLink}
+      ${histHtml}`;
+    }
+
+    function buildHistorySection(addr) {
+      if (!historyExpanded.has(addr)) return '';
+      if (historyLoading.has(addr)) {
+        return `<div class="da-history-list"><div class="da-history-item" role="status">Loading history…</div></div>`;
+      }
+      if (historyError.has(addr)) {
+        return `<div class="da-history-list"><div class="da-history-item" style="color:var(--red)">Failed to load history.</div></div>`;
+      }
+      const items = historyData.get(addr);
+      if (!items || items.length === 0) {
+        return `<div class="da-history-list"><div class="da-history-item">No previous analyses found.</div></div>`;
+      }
+      const rows = items.map(h => {
+        const type = h.strategy_type || '–';
+        const rep = h.is_replicable ? 'Replicable' : 'Not replicable';
+        return `<div class="da-history-item">
+          <strong>${timeAgo(h.generated_at)}</strong> &mdash;
+          ${esc(type)} &middot; ${rep}
+          ${h.replicability_confidence != null ? ` (${fmtPctDirect(h.replicability_confidence)} confidence)` : ''}
+        </div>`;
+      }).join('');
+      return `<div class="da-history-list" aria-label="Previous analyses">${rows}</div>`;
+    }
+
+    function buildDeepSection(w) {
+      const addr = w.address;
+
+      if (w.rank > 10) {
+        return `<div class="da-section">
+          <p class="da-placeholder-msg" role="note">Deep strategy analysis available for top-10 wallets only. This wallet ranks #${w.rank}.</p>
+        </div>`;
+      }
+
+      const loading = strategyLoading.has(addr);
+      const error   = strategyError.get(addr);
+      const data    = strategyData.get(addr);
+      const regen   = regenState.get(addr);
+
+      let inner;
+      if (loading) {
+        inner = buildDeepSkeleton();
+      } else if (error) {
+        inner = `<div class="da-header"><h2 class="da-title">Strategy Analysis</h2></div>
+          <p class="da-error-msg" role="alert">Failed to load strategy analysis.</p>`;
+      } else if (data === undefined) {
+        inner = buildDeepSkeleton();
+      } else if (data === null) {
+        inner = buildDeepAnalysisEmpty(addr, regen);
+      } else {
+        inner = buildDeepAnalysisFull(addr, data, regen);
+      }
+
+      return `<section class="da-section" aria-label="Deep strategy analysis">${inner}</section>`;
     }
 
     // ── Build detail row ──────────────────────────────────────────────────────
@@ -795,6 +1623,7 @@
             ${edgeSec}
             ${notesSec}
             ${flagsSec}
+            ${buildDeepSection(w)}
             <div class="detail-actions">
               <a class="action-link" href="https://polymarket.com/profile/${w.address}" target="_blank" rel="noopener noreferrer">View on Polymarket ↗</a>
               <button class="action-link" onclick="copyAddr(event,'${w.address}')">Copy full address</button>
@@ -814,10 +1643,11 @@
         { key: 'all',          label: 'All Wallets'  },
         { key: 'watchlist',    label: 'Watchlist'    },
         { key: 'new_activity', label: 'New Activity' },
+        { key: 'strategies',   label: 'Strategies'   },
       ];
-      return '<div class="filter-tabs">' +
+      return '<div class="filter-tabs" role="tablist">' +
         tabs.map(t =>
-          `<button class="tab-btn${viewFilter === t.key ? ' active' : ''}" onclick="setFilter('${t.key}')">${t.label}</button>`
+          `<button role="tab" aria-selected="${viewFilter === t.key}" class="tab-btn${viewFilter === t.key ? ' active' : ''}" onclick="setFilter('${t.key}')">${t.label}</button>`
         ).join('') +
         '</div>';
     }
@@ -836,14 +1666,121 @@
       return `👁 Watching ${wLabel} · <a href="#" onclick="setFilter('new_activity');return false;">${wnaLabel} (${pLabel})</a>`;
     }
 
+    // ── Strategies tab view ───────────────────────────────────────────────────
+
+    function getStrategyTypes() {
+      const types = new Set();
+      stratTabData.forEach(d => { if (d && d.strategy_type) types.add(d.strategy_type); });
+      return ['all', ...Array.from(types).sort()];
+    }
+
+    function setStratTypeFilter(e, val) {
+      e.stopPropagation();
+      stratTypeFilter = val;
+      render();
+    }
+
+    function setStratReplFilter(e, val) {
+      e.stopPropagation();
+      stratReplFilter = val;
+      render();
+    }
+
+    function buildStrategiesView() {
+      const types = getStrategyTypes();
+
+      const typePills = types.map(t =>
+        `<button class="strat-pill${stratTypeFilter === t ? ' active' : ''}" onclick="setStratTypeFilter(event,'${esc(t)}')">${t === 'all' ? 'All Types' : esc(t)}</button>`
+      ).join('');
+
+      const replPills = ['all', 'replicable', 'not_replicable'].map(r => {
+        const label = r === 'all' ? 'All' : r === 'replicable' ? 'Replicable' : 'Not Replicable';
+        return `<button class="strat-pill${stratReplFilter === r ? ' active' : ''}" onclick="setStratReplFilter(event,'${r}')">${label}</button>`;
+      }).join('');
+
+      const filters = `<div class="strat-filters" aria-label="Strategy filters">
+        <div class="strat-filter-group">
+          <span class="strat-filter-label">Type:</span>
+          ${typePills}
+        </div>
+        <div class="strat-filter-group">
+          <span class="strat-filter-label">Replicable:</span>
+          ${replPills}
+        </div>
+      </div>`;
+
+      const top10 = wallets.filter(w => w.rank <= 10).sort((a, b) => a.rank - b.rank);
+
+      const filtered = top10.filter(w => {
+        const d = stratTabData.get(w.address);
+        if (stratTypeFilter !== 'all' && d && d.strategy_type !== stratTypeFilter) return false;
+        if (stratReplFilter === 'replicable'     && d && !d.is_replicable) return false;
+        if (stratReplFilter === 'not_replicable' && d &&  d.is_replicable) return false;
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        const allLoading = top10.every(w => stratTabLoading.has(w.address));
+        if (allLoading) {
+          const skeletons = top10.map(() =>
+            `<div class="strategy-card"><div class="sc-body">${buildDeepSkeleton()}</div></div>`
+          ).join('');
+          return filters + `<div class="strategies-list">${skeletons}</div>`;
+        }
+        return filters + '<div class="state-msg">No wallets match the selected filters.</div>';
+      }
+
+      const cards = filtered.map(w => {
+        const addr    = w.address;
+        const loading = stratTabLoading.has(addr);
+        const error   = stratTabError.get(addr);
+        const data    = stratTabData.get(addr);
+        const regen   = regenState.get(addr);
+        const m       = w.metrics || {};
+        const pnl     = m.total_pnl;
+        const pc      = pnl == null ? 'neu' : pnl > 0 ? 'pos' : 'neg';
+
+        let analysisHtml;
+        if (loading) {
+          analysisHtml = buildDeepSkeleton();
+        } else if (error) {
+          analysisHtml = `<p class="da-error-msg" role="alert">Failed to load strategy analysis.</p>`;
+        } else if (data === undefined || data === null) {
+          analysisHtml = buildDeepAnalysisEmpty(addr, regen);
+        } else {
+          analysisHtml = buildDeepAnalysisFull(addr, data, regen);
+        }
+
+        return `<article class="strategy-card" aria-label="Wallet ${shortAddr(addr)} strategy">
+          <div class="sc-header">
+            <span class="sc-rank">#${w.rank}</span>
+            <button class="sc-addr" title="${esc(addr)}" onclick="copyAddr(event,'${addr}')">${shortAddr(addr)}</button>
+            <span class="sc-pnl ${pc}">${fmtPnl(pnl)}</span>
+          </div>
+          <div class="sc-body">
+            <section aria-label="Deep strategy analysis">${analysisHtml}</section>
+          </div>
+        </article>`;
+      }).join('');
+
+      return filters + `<div class="strategies-list" role="list">${cards}</div>`;
+    }
+
     // ── Render ────────────────────────────────────────────────────────────────
 
     function render() {
       document.getElementById('watchlist-summary').innerHTML = buildWatchlistSummary();
 
+      let tableContent;
+
+      if (viewFilter === 'strategies') {
+        tableContent = buildStrategiesView();
+        document.getElementById('main').innerHTML = buildFilterTabs() + tableContent;
+        return;
+      }
+
       const sorted = getSorted();
 
-      let tableContent;
       if (!sorted.length) {
         let msg;
         if (viewFilter === 'watchlist') {
@@ -859,7 +1796,7 @@
           buildRow(w) + (openAddr === w.address ? buildDetail(w) : '')
         ).join('');
         tableContent =
-          `<div class="table-wrap">
+          `<div class="table-wrap" role="region" aria-label="Wallet leaderboard">
              <table>
                <thead>${buildThead()}</thead>
                <tbody>${rows}</tbody>
@@ -873,11 +1810,12 @@
     // ── Init ──────────────────────────────────────────────────────────────────
 
     async function init() {
-      // Load user info for the header (non-blocking)
+      // Load user info for the header and auth state (non-blocking)
       fetch('/api/auth/me').then(r => {
         if (r.ok) return r.json();
       }).then(me => {
         if (!me) return;
+        currentUser = me;
         const email = me.email || me.name || 'you';
         document.getElementById('user-info').innerHTML =
           `<span>Signed in as ${esc(email)}</span>` +
@@ -910,9 +1848,7 @@
           return;
         }
 
-        // Derive watchlist summary from leaderboard data
         watchlistSummary = computeLocalSummary();
-
         render();
       } catch (err) {
         document.getElementById('main').innerHTML =
