@@ -71,19 +71,63 @@ def get_all_wallets() -> list[Wallet]:
 # ── Positions ─────────────────────────────────────────────────────────────────
 
 def upsert_positions(positions: list[Position]) -> None:
-    """Replace all positions for a wallet with the freshly fetched set."""
+    """Append-mostly upsert: update existing rows, insert new ones, mark missing as inactive."""
     if not positions:
         return
     address = positions[0].wallet_address
+    now = datetime.utcnow()
+    touched_keys: set[tuple] = set()
+
     with _session() as s:
-        # Delete all existing positions for this wallet before reinserting
-        existing = s.exec(select(Position).where(Position.wallet_address == address)).all()
-        for row in existing:
-            s.delete(row)
-        s.flush()
-        s.add_all(positions)
+        for p in positions:
+            key = (p.wallet_address, p.condition_id, p.asset)
+            touched_keys.add(key)
+
+            existing = s.exec(
+                select(Position).where(
+                    Position.wallet_address == p.wallet_address,
+                    Position.condition_id == p.condition_id,
+                    Position.asset == p.asset,
+                )
+            ).first()
+
+            if existing:
+                existing.last_seen_at = now
+                existing.is_active = True
+                existing.avg_price = p.avg_price
+                existing.size = p.size
+                existing.initial_value = p.initial_value
+                existing.current_value = p.current_value
+                existing.cash_pnl = p.cash_pnl
+                existing.percent_pnl = p.percent_pnl
+                existing.total_bought = p.total_bought
+                existing.realized_pnl = p.realized_pnl
+                existing.percent_realized_pnl = p.percent_realized_pnl
+                existing.current_price = p.current_price
+                existing.redeemable = p.redeemable
+                existing.fetched_at = now
+                s.add(existing)
+            else:
+                p.first_seen_at = now
+                p.last_seen_at = now
+                p.is_active = True
+                p.fetched_at = now
+                s.add(p)
+
+        # Positions absent from this scan have closed/disappeared — mark inactive
+        all_active = s.exec(
+            select(Position).where(
+                Position.wallet_address == address,
+                Position.is_active == True,  # noqa: E712
+            )
+        ).all()
+        for row in all_active:
+            if (row.wallet_address, row.condition_id, row.asset) not in touched_keys:
+                row.is_active = False
+                s.add(row)
+
         s.commit()
-        logger.debug("Stored %d positions for %s", len(positions), address)
+        logger.debug("Upserted %d positions for %s", len(positions), address)
 
 
 def get_positions_for_wallet(address: str) -> list[Position]:
@@ -276,6 +320,45 @@ def remove_user_watchlist_entry(user_id: str, wallet_address: str) -> bool:
         s.delete(entry)
         s.commit()
         return True
+
+
+def update_watchlist_last_seen(user_id: str, wallet_address: str) -> bool:
+    """Set last_seen_at = NOW() for a user+wallet entry. Return True if updated."""
+    with _session() as s:
+        entry = s.exec(
+            select(UserWatchlist).where(
+                UserWatchlist.user_id == user_id,
+                UserWatchlist.wallet_address == wallet_address,
+            )
+        ).first()
+        if not entry:
+            return False
+        entry.last_seen_at = datetime.utcnow()
+        s.add(entry)
+        s.commit()
+        return True
+
+
+def get_activity_counts_for_user(user_id: str) -> dict[str, int]:
+    """Return {wallet_address: new_position_count} — positions seen since user's last_seen_at."""
+    try:
+        with _session() as s:
+            entries = s.exec(
+                select(UserWatchlist).where(UserWatchlist.user_id == user_id)
+            ).all()
+            result: dict[str, int] = {}
+            for entry in entries:
+                count = s.exec(
+                    select(func.count()).select_from(Position).where(
+                        Position.wallet_address == entry.wallet_address,
+                        Position.first_seen_at > entry.last_seen_at,
+                    )
+                ).one()
+                result[entry.wallet_address] = count
+            return result
+    except Exception:
+        logger.warning("get_activity_counts_for_user failed — run migrate_position_history.py")
+        return {}
 
 
 # ── Alerts ────────────────────────────────────────────────────────────────────

@@ -82,18 +82,89 @@
       margin: 0 4px;
     }
 
-    /* ── Watch button ─────────────────────────────────────────────── */
+    /* ── Watchlist summary bar ────────────────────────────────── */
 
-    .watch-btn {
+    #watchlist-summary {
+      margin-top: 4px;
       font-size: 12px;
+      color: var(--muted);
+    }
+
+    #watchlist-summary a {
+      color: var(--blue);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    #watchlist-summary a:hover { text-decoration: underline; }
+
+    /* ── View filter tabs ─────────────────────────────────────── */
+
+    .filter-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+    }
+
+    .tab-btn {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: none;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s, border-color 0.1s;
+      white-space: nowrap;
+    }
+    .tab-btn:hover { color: var(--text); border-color: #444c56; }
+    .tab-btn.active {
+      background: var(--blue);
+      color: #0d1117;
+      border-color: var(--blue);
+    }
+
+    @media (max-width: 480px) {
+      .filter-tabs { overflow-x: auto; padding-bottom: 2px; flex-wrap: nowrap; }
+    }
+
+    /* ── Star / watch button ──────────────────────────────────── */
+
+    .star-btn {
+      font-size: 15px;
+      line-height: 1;
       background: none;
       border: none;
-      color: var(--blue);
+      color: var(--muted);
       cursor: pointer;
-      padding: 0;
+      padding: 2px 3px;
+      border-radius: 4px;
+      transition: color 0.1s, background 0.1s;
+      vertical-align: middle;
     }
-    .watch-btn:hover { text-decoration: underline; }
-    .watch-btn.watching { color: var(--muted); }
+    .star-btn:hover { color: var(--yellow); background: rgba(210,153,34,0.1); }
+    .star-btn.watching { color: var(--yellow); }
+
+    /* ── Activity dot ─────────────────────────────────────────── */
+
+    .activity-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--blue);
+      vertical-align: middle;
+      margin-left: 3px;
+      cursor: default;
+      flex-shrink: 0;
+    }
+
+    .watch-cell {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      white-space: nowrap;
+    }
 
     /* ── Table wrapper ────────────────────────────────────────── */
 
@@ -131,6 +202,8 @@
     thead th.asc::after  { content: ' ↑'; color: var(--blue); }
     thead th.desc::after { content: ' ↓'; color: var(--blue); }
 
+    th.col-watch { width: 36px; padding: 10px 6px; }
+
     /* ── Tbody ────────────────────────────────────────────────── */
 
     tbody tr.row {
@@ -148,6 +221,8 @@
       vertical-align: middle;
       border-bottom: 1px solid var(--border);
     }
+
+    td.col-watch { padding: 10px 6px; }
 
     tbody tr:last-child td { border-bottom: none; }
 
@@ -297,6 +372,8 @@
       margin-top: 14px;
       padding-top: 12px;
       border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+      align-items: center;
     }
 
     .action-link {
@@ -357,6 +434,7 @@
         <div class="header-user" id="user-info"></div>
       </div>
       <div class="header-meta" id="meta"></div>
+      <div id="watchlist-summary"></div>
     </header>
     <main id="main">
       <div class="state-msg">Loading…</div>
@@ -390,6 +468,33 @@
     let sortKey = 'rank';
     let sortDir = 'asc';
     let openAddr = null;
+    let viewFilter = 'all'; // 'all' | 'watchlist' | 'new_activity'
+    let watchlistSummary = null;
+
+    // ── Filtering ─────────────────────────────────────────────────────────────
+
+    function setFilter(f) {
+      viewFilter = f;
+      render();
+    }
+
+    function getFiltered() {
+      if (viewFilter === 'watchlist')    return wallets.filter(w => w.is_watched);
+      if (viewFilter === 'new_activity') return wallets.filter(w => w.is_watched && w.new_activity_count > 0);
+      return wallets;
+    }
+
+    // ── Watchlist summary (local recompute after mutations) ───────────────────
+
+    function computeLocalSummary() {
+      const watched = wallets.filter(w => w.is_watched);
+      const withActivity = watched.filter(w => (w.new_activity_count || 0) > 0);
+      return {
+        watched_count: watched.length,
+        wallets_with_new_activity: withActivity.length,
+        total_new_positions: withActivity.reduce((s, w) => s + (w.new_activity_count || 0), 0),
+      };
+    }
 
     // ── Watch toggle ──────────────────────────────────────────────────────────
 
@@ -402,6 +507,7 @@
         if (watching) {
           await fetch('/api/watchlist/' + addr, { method: 'DELETE' });
           w.is_watched = false;
+          w.new_activity_count = 0;
         } else {
           await fetch('/api/watchlist', {
             method: 'POST',
@@ -409,7 +515,9 @@
             body: JSON.stringify({ wallet_address: addr }),
           });
           w.is_watched = true;
+          w.new_activity_count = 0;
         }
+        watchlistSummary = computeLocalSummary();
         render();
       } catch (err) {
         showToast('Watchlist update failed');
@@ -524,7 +632,7 @@
     }
 
     function getSorted() {
-      return [...wallets].sort((a, b) => {
+      return [...getFiltered()].sort((a, b) => {
         const d = sortVal(a, sortKey) - sortVal(b, sortKey);
         return sortDir === 'asc' ? d : -d;
       });
@@ -536,24 +644,41 @@
       render();
     }
 
-    // ── Toggle detail ─────────────────────────────────────────────────────────
+    // ── Toggle detail (marks wallet seen when expanded) ───────────────────────
 
     function toggle(addr) {
-      openAddr = openAddr === addr ? null : addr;
+      const wasOpen = openAddr === addr;
+      openAddr = wasOpen ? null : addr;
+
+      if (!wasOpen) {
+        const w = wallets.find(x => x.address === addr);
+        if (w && w.is_watched && (w.new_activity_count || 0) > 0) {
+          const prevCount = w.new_activity_count;
+          fetch('/api/watchlist/' + addr + '/seen', { method: 'POST' })
+            .then(() => {
+              w.new_activity_count = 0;
+              watchlistSummary = computeLocalSummary();
+              render();
+            })
+            .catch(() => {});
+        }
+      }
+
       render();
     }
 
     // ── Column definitions ────────────────────────────────────────────────────
 
     const COLS = [
-      { key: 'rank',   label: 'Rank',          sort: true  },
-      { key: 'addr',   label: 'Wallet',         sort: false },
-      { key: 'pnl',    label: 'P&amp;L',        sort: true  },
-      { key: 'volume', label: 'Volume',          sort: true,  cls: 'col-vol'   },
-      { key: 'score',  label: 'Score',           sort: true  },
-      { key: 'skill',  label: 'Skill',           sort: true,  cls: 'col-skill' },
-      { key: 'edge',   label: 'Edge Hypothesis', sort: false },
-      { key: 'flags',  label: 'Flags',           sort: false },
+      { key: 'rank',   label: 'Rank',          sort: true                  },
+      { key: 'watch',  label: '',               sort: false, cls: 'col-watch' },
+      { key: 'addr',   label: 'Wallet',         sort: false                },
+      { key: 'pnl',    label: 'P&amp;L',        sort: true                 },
+      { key: 'volume', label: 'Volume',          sort: true,  cls: 'col-vol'  },
+      { key: 'score',  label: 'Score',           sort: true                 },
+      { key: 'skill',  label: 'Skill',           sort: true,  cls: 'col-skill'},
+      { key: 'edge',   label: 'Edge Hypothesis', sort: false                },
+      { key: 'flags',  label: 'Flags',           sort: false                },
     ];
 
     // ── Build thead ───────────────────────────────────────────────────────────
@@ -591,8 +716,26 @@
            </div>`
         : '<span class="neu">–</span>';
 
+      const actCount = w.new_activity_count || 0;
+      const actTip = actCount === 1
+        ? '1 new position since you last viewed'
+        : `${actCount} new positions since you last viewed`;
+      const actDot = actCount > 0
+        ? `<span class="activity-dot" title="${actTip}"></span>`
+        : '';
+
+      const starClass = w.is_watched ? 'star-btn watching' : 'star-btn';
+      const starIcon  = w.is_watched ? '★' : '☆';
+      const starTip   = w.is_watched ? 'Remove from watchlist' : 'Add to watchlist';
+      const watchCell = `<td class="col-watch">
+        <div class="watch-cell">
+          <button class="${starClass}" title="${starTip}" onclick="watchToggle(event,'${w.address}')">${starIcon}</button>${actDot}
+        </div>
+      </td>`;
+
       return `<tr class="row${openAddr === w.address ? ' open' : ''}" onclick="toggle('${w.address}')">
         <td><span class="rank${w.rank <= 10 ? ' bold' : ''}">#${w.rank}</span></td>
+        ${watchCell}
         <td><button class="addr-btn" title="${esc(w.address)}" onclick="copyAddr(event,'${w.address}')">${shortAddr(w.address)}</button></td>
         <td><span class="${pc}">${fmtPnl(pnl)}</span></td>
         <td class="col-vol"><span class="vol">${fmtVol(m.total_volume)}</span></td>
@@ -634,8 +777,10 @@
              </div>
            </div>` : '';
 
+      const watchLabel = w.is_watched ? '★ Watching' : '☆ Watch';
+
       return `<tr class="detail-row">
-        <td colspan="8" class="detail-cell">
+        <td colspan="9" class="detail-cell">
           <div class="detail-inner">
             <div class="detail-metrics">
               ${dm('Trade Count',        m.trade_count ?? '–')}
@@ -653,8 +798,8 @@
             <div class="detail-actions">
               <a class="action-link" href="https://polymarket.com/profile/${w.address}" target="_blank" rel="noopener noreferrer">View on Polymarket ↗</a>
               <button class="action-link" onclick="copyAddr(event,'${w.address}')">Copy full address</button>
-              <button class="watch-btn${w.is_watched ? ' watching' : ''}" onclick="watchToggle(event,'${w.address}')">
-                ${w.is_watched ? '★ Watching' : '☆ Watch'}
+              <button class="star-btn${w.is_watched ? ' watching' : ''}" style="font-size:13px" onclick="watchToggle(event,'${w.address}')">
+                ${watchLabel}
               </button>
             </div>
           </div>
@@ -662,20 +807,67 @@
       </tr>`;
     }
 
+    // ── Build filter tabs ─────────────────────────────────────────────────────
+
+    function buildFilterTabs() {
+      const tabs = [
+        { key: 'all',          label: 'All Wallets'  },
+        { key: 'watchlist',    label: 'Watchlist'    },
+        { key: 'new_activity', label: 'New Activity' },
+      ];
+      return '<div class="filter-tabs">' +
+        tabs.map(t =>
+          `<button class="tab-btn${viewFilter === t.key ? ' active' : ''}" onclick="setFilter('${t.key}')">${t.label}</button>`
+        ).join('') +
+        '</div>';
+    }
+
+    // ── Build watchlist summary bar ───────────────────────────────────────────
+
+    function buildWatchlistSummary() {
+      if (!watchlistSummary || watchlistSummary.watched_count === 0) return '';
+      const { watched_count: wc, wallets_with_new_activity: wna, total_new_positions: tnp } = watchlistSummary;
+      const wLabel = wc === 1 ? '1 wallet' : `${wc} wallets`;
+      if (wna === 0) {
+        return `👁 Watching ${wLabel} · all caught up`;
+      }
+      const pLabel = tnp === 1 ? '1 new position' : `${tnp} new positions`;
+      const wnaLabel = wna === 1 ? '1 with new activity' : `${wna} with new activity`;
+      return `👁 Watching ${wLabel} · <a href="#" onclick="setFilter('new_activity');return false;">${wnaLabel} (${pLabel})</a>`;
+    }
+
     // ── Render ────────────────────────────────────────────────────────────────
 
     function render() {
-      const rows = getSorted().map(w =>
-        buildRow(w) + (openAddr === w.address ? buildDetail(w) : '')
-      ).join('');
+      document.getElementById('watchlist-summary').innerHTML = buildWatchlistSummary();
 
-      document.getElementById('main').innerHTML =
-        `<div class="table-wrap">
-           <table>
-             <thead>${buildThead()}</thead>
-             <tbody>${rows}</tbody>
-           </table>
-         </div>`;
+      const sorted = getSorted();
+
+      let tableContent;
+      if (!sorted.length) {
+        let msg;
+        if (viewFilter === 'watchlist') {
+          msg = "You haven&#39;t watched any wallets yet. Star a wallet to add it here.";
+        } else if (viewFilter === 'new_activity') {
+          msg = "No new activity on your watched wallets.";
+        } else {
+          msg = "No data yet — first scan in progress. Check back in an hour.";
+        }
+        tableContent = `<div class="state-msg">${msg}</div>`;
+      } else {
+        const rows = sorted.map(w =>
+          buildRow(w) + (openAddr === w.address ? buildDetail(w) : '')
+        ).join('');
+        tableContent =
+          `<div class="table-wrap">
+             <table>
+               <thead>${buildThead()}</thead>
+               <tbody>${rows}</tbody>
+             </table>
+           </div>`;
+      }
+
+      document.getElementById('main').innerHTML = buildFilterTabs() + tableContent;
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
@@ -714,9 +906,12 @@
 
         if (!wallets.length) {
           document.getElementById('main').innerHTML =
-            '<div class="state-msg">No data yet — first scan in progress. Check back in an hour.</div>';
+            buildFilterTabs() + '<div class="state-msg">No data yet — first scan in progress. Check back in an hour.</div>';
           return;
         }
+
+        // Derive watchlist summary from leaderboard data
+        watchlistSummary = computeLocalSummary();
 
         render();
       } catch (err) {
