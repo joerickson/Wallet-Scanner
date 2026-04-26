@@ -4,6 +4,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from data.database import get_engine
@@ -165,6 +166,13 @@ def update_claude_review(
         existing.reviewed_at = datetime.utcnow()
         s.add(existing)
         s.commit()
+
+
+def get_rankings_count() -> int:
+    """Return the total number of ranked wallets."""
+    with _session() as s:
+        result = s.exec(select(func.count()).select_from(WalletRanking)).one()
+        return result
 
 
 def get_top_rankings(limit: int = 50) -> list[WalletRanking]:

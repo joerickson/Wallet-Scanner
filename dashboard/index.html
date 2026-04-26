@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wallet Scanner</title>
+  <style>
+    :root {
+      --bg:      #0d1117;
+      --surface: #161b22;
+      --surface2: #1c2128;
+      --border:  #21262d;
+      --text:    #e6edf3;
+      --muted:   #8b949e;
+      --green:   #3fb950;
+      --red:     #f85149;
+      --yellow:  #d29922;
+      --blue:    #58a6ff;
+      --hover:   #1c2128;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    #app {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+
+    /* ── Header ───────────────────────────────────────────────── */
+
+    header { margin-bottom: 20px; }
+
+    header h1 {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .header-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .header-meta span + span::before {
+      content: ' · ';
+      margin: 0 4px;
+    }
+
+    /* ── Table wrapper ────────────────────────────────────────── */
+
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      -webkit-overflow-scrolling: touch;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+    }
+
+    /* ── Thead ────────────────────────────────────────────────── */
+
+    thead th {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      user-select: none;
+      background: var(--surface);
+    }
+
+    thead th.sort { cursor: pointer; }
+    thead th.sort:hover { color: var(--text); }
+    thead th.asc::after  { content: ' ↑'; color: var(--blue); }
+    thead th.desc::after { content: ' ↓'; color: var(--blue); }
+
+    /* ── Tbody ────────────────────────────────────────────────── */
+
+    tbody tr.row {
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+
+    tbody tr.row:hover,
+    tbody tr.row.open { background: var(--hover); }
+
+    tbody tr.detail-row:hover { background: transparent; }
+
+    td {
+      padding: 10px 12px;
+      vertical-align: middle;
+      border-bottom: 1px solid var(--border);
+    }
+
+    tbody tr:last-child td { border-bottom: none; }
+
+    /* ── Rank ─────────────────────────────────────────────────── */
+
+    .rank {
+      font-size: 13px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .rank.bold { color: var(--text); font-weight: 700; }
+
+    /* ── Wallet ───────────────────────────────────────────────── */
+
+    .addr-btn {
+      font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+      font-size: 12px;
+      background: none;
+      border: none;
+      color: var(--blue);
+      cursor: pointer;
+      padding: 0;
+      white-space: nowrap;
+    }
+    .addr-btn:hover { text-decoration: underline; }
+
+    /* ── P&L ──────────────────────────────────────────────────── */
+
+    .pos { color: var(--green); font-variant-numeric: tabular-nums; }
+    .neg { color: var(--red);   font-variant-numeric: tabular-nums; }
+    .neu { color: var(--muted); }
+
+    /* ── Volume ───────────────────────────────────────────────── */
+
+    .vol { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+    /* ── Score badge ──────────────────────────────────────────── */
+
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .bg  { background: rgba(63,185,80,0.12);   color: var(--green); }
+    .bb  { background: rgba(88,166,255,0.12);  color: var(--blue);  }
+    .bk  { background: rgba(139,148,158,0.12); color: var(--muted); }
+
+    /* ── Skill bar ────────────────────────────────────────────── */
+
+    .skill-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 72px;
+    }
+    .skill-track {
+      width: 44px;
+      height: 5px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .skill-fill { height: 100%; background: var(--green); border-radius: 3px; }
+    .skill-num  { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    /* ── Edge ─────────────────────────────────────────────────── */
+
+    .edge {
+      color: var(--muted);
+      font-size: 12px;
+      max-width: 220px;
+      min-width: 80px;
+    }
+
+    /* ── Flag pills ───────────────────────────────────────────── */
+
+    .flags { display: flex; flex-wrap: wrap; gap: 3px; min-width: 60px; }
+
+    .pill {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .pr { background: rgba(248,81,73,0.12);   color: var(--red);    }
+    .py { background: rgba(210,153,34,0.12);  color: var(--yellow); }
+    .pk { background: rgba(139,148,158,0.12); color: var(--muted);  }
+
+    /* ── Detail row ───────────────────────────────────────────── */
+
+    .detail-cell {
+      padding: 0;
+      background: var(--surface2);
+      border-top: 1px solid var(--border);
+    }
+
+    .detail-inner { padding: 16px; }
+
+    .detail-metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px 16px;
+      margin-bottom: 12px;
+    }
+
+    .dm-label {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 2px;
+    }
+    .dm-value {
+      font-size: 14px;
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .detail-sec { margin-top: 12px; }
+
+    .detail-sec-label {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+
+    .detail-sec-body {
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.65;
+    }
+
+    .detail-flags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+
+    .detail-actions {
+      display: flex;
+      gap: 14px;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .action-link {
+      font-size: 12px;
+      color: var(--blue);
+      text-decoration: none;
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 0;
+    }
+    .action-link:hover { text-decoration: underline; }
+
+    /* ── States ───────────────────────────────────────────────── */
+
+    .state-msg {
+      text-align: center;
+      padding: 64px 24px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    /* ── Toast ────────────────────────────────────────────────── */
+
+    #toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.18s, transform 0.18s;
+      pointer-events: none;
+      z-index: 1000;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+
+    /* ── Mobile ───────────────────────────────────────────────── */
+
+    @media (max-width: 700px) {
+      #app { padding: 16px 10px 32px; }
+      .col-vol, .col-skill { display: none; }
+      .edge { max-width: 120px; }
+      .detail-metrics { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Wallet Scanner</h1>
+      <div class="header-meta" id="meta"></div>
+    </header>
+    <main id="main">
+      <div class="state-msg">Loading…</div>
+    </main>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    // ── Flag config ───────────────────────────────────────────────────────────
+
+    const FLAG_SEV = {
+      single_event_luck:    'r',
+      survivorship:         'r',
+      market_concentration: 'y',
+      recency_cliff:        'y',
+      data_artefact:        'k',
+    };
+
+    const FLAG_LABEL = {
+      single_event_luck:    'single event',
+      survivorship:         'survivorship',
+      market_concentration: 'concentration',
+      recency_cliff:        'recency cliff',
+      data_artefact:        'data artefact',
+    };
+
+    // ── State ─────────────────────────────────────────────────────────────────
+
+    let wallets = [];
+    let sortKey = 'rank';
+    let sortDir = 'asc';
+    let openAddr = null;
+
+    // ── Formatting ────────────────────────────────────────────────────────────
+
+    function esc(s) {
+      if (s == null) return '';
+      return String(s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function fmtPnl(v) {
+      if (v == null) return '–';
+      const abs = Math.abs(v);
+      const sign = v < 0 ? '-' : '';
+      return sign + '$' + (abs >= 1000 ? Math.round(abs).toLocaleString('en-US') : abs.toFixed(2));
+    }
+
+    function fmtVol(v) {
+      if (v == null) return '–';
+      if (v >= 1e9) return '$' + (v / 1e9).toFixed(1) + 'B';
+      if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+      if (v >= 1e3) return '$' + (v / 1e3).toFixed(1) + 'K';
+      return '$' + v.toFixed(0);
+    }
+
+    function fmtUsd(v) {
+      return v == null ? '–' : '$' + Math.round(Math.abs(v)).toLocaleString('en-US');
+    }
+
+    function fmtPct(v) {
+      return v == null ? '–' : (v * 100).toFixed(1) + '%';
+    }
+
+    function shortAddr(a) {
+      return a && a.length >= 10 ? a.slice(0, 6) + '…' + a.slice(-4) : (a || '–');
+    }
+
+    function timeAgo(iso) {
+      if (!iso) return '';
+      const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+      if (s < 60)    return 'just now';
+      if (s < 3600)  return Math.floor(s / 60) + ' min ago';
+      if (s < 86400) return Math.floor(s / 3600) + ' hr ago';
+      return Math.floor(s / 86400) + ' days ago';
+    }
+
+    function badgeClass(s) {
+      if (s == null) return 'bk';
+      return s >= 0.85 ? 'bg' : s >= 0.70 ? 'bb' : 'bk';
+    }
+
+    function normFlag(f) {
+      return String(f).toLowerCase().replace(/[\s-]+/g, '_').split(':')[0].trim();
+    }
+
+    function pill(f, forceClass) {
+      const key = normFlag(f);
+      const sev = forceClass || FLAG_SEV[key] || 'k';
+      const label = FLAG_LABEL[key] || f;
+      return `<span class="pill p${sev}">${esc(label)}</span>`;
+    }
+
+    // ── Clipboard ─────────────────────────────────────────────────────────────
+
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 2000);
+    }
+
+    function copyAddr(e, addr) {
+      e.stopPropagation();
+      const write = () => showToast('Copied!');
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(addr).then(write).catch(() => fallback(addr, write));
+      } else {
+        fallback(addr, write);
+      }
+    }
+
+    function fallback(text, cb) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      cb();
+    }
+
+    // ── Sort ──────────────────────────────────────────────────────────────────
+
+    function sortVal(w, key) {
+      const m = w.metrics || {};
+      switch (key) {
+        case 'rank':   return w.rank ?? Infinity;
+        case 'pnl':    return m.total_pnl ?? -Infinity;
+        case 'volume': return m.total_volume ?? 0;
+        case 'score':  return w.composite_score ?? 0;
+        case 'skill':  return w.skill_signal ?? 0;
+        default:       return 0;
+      }
+    }
+
+    function getSorted() {
+      return [...wallets].sort((a, b) => {
+        const d = sortVal(a, sortKey) - sortVal(b, sortKey);
+        return sortDir === 'asc' ? d : -d;
+      });
+    }
+
+    function onSort(key) {
+      if (sortKey === key) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      else { sortKey = key; sortDir = key === 'rank' ? 'asc' : 'desc'; }
+      render();
+    }
+
+    // ── Toggle detail ─────────────────────────────────────────────────────────
+
+    function toggle(addr) {
+      openAddr = openAddr === addr ? null : addr;
+      render();
+    }
+
+    // ── Column definitions ────────────────────────────────────────────────────
+
+    const COLS = [
+      { key: 'rank',   label: 'Rank',          sort: true  },
+      { key: 'addr',   label: 'Wallet',         sort: false },
+      { key: 'pnl',    label: 'P&amp;L',        sort: true  },
+      { key: 'volume', label: 'Volume',          sort: true,  cls: 'col-vol'   },
+      { key: 'score',  label: 'Score',           sort: true  },
+      { key: 'skill',  label: 'Skill',           sort: true,  cls: 'col-skill' },
+      { key: 'edge',   label: 'Edge Hypothesis', sort: false },
+      { key: 'flags',  label: 'Flags',           sort: false },
+    ];
+
+    // ── Build thead ───────────────────────────────────────────────────────────
+
+    function buildThead() {
+      return '<tr>' + COLS.map(c => {
+        const classes = [
+          c.cls || '',
+          c.sort ? 'sort' : '',
+          c.sort && sortKey === c.key ? sortDir : '',
+        ].filter(Boolean).join(' ');
+        const click = c.sort ? ` onclick="onSort('${c.key}')"` : '';
+        return `<th class="${classes}"${click}>${c.label}</th>`;
+      }).join('') + '</tr>';
+    }
+
+    // ── Build data row ────────────────────────────────────────────────────────
+
+    function buildRow(w) {
+      const m   = w.metrics || {};
+      const pnl = m.total_pnl;
+      const pc  = pnl == null ? 'neu' : pnl > 0 ? 'pos' : 'neg';
+      const s   = w.composite_score;
+      const sk  = w.skill_signal;
+      const flags = w.red_flags || [];
+      const edge  = w.edge_hypothesis || '';
+      const edgeTrunc = edge.length > 80 ? edge.slice(0, 80) + '…' : edge;
+
+      const skillHTML = sk != null
+        ? `<div class="skill-wrap">
+             <div class="skill-track">
+               <div class="skill-fill" style="width:${Math.round(sk * 100)}%"></div>
+             </div>
+             <span class="skill-num">${sk.toFixed(2)}</span>
+           </div>`
+        : '<span class="neu">–</span>';
+
+      return `<tr class="row${openAddr === w.address ? ' open' : ''}" onclick="toggle('${w.address}')">
+        <td><span class="rank${w.rank <= 10 ? ' bold' : ''}">#${w.rank}</span></td>
+        <td><button class="addr-btn" title="${esc(w.address)}" onclick="copyAddr(event,'${w.address}')">${shortAddr(w.address)}</button></td>
+        <td><span class="${pc}">${fmtPnl(pnl)}</span></td>
+        <td class="col-vol"><span class="vol">${fmtVol(m.total_volume)}</span></td>
+        <td>${s != null ? `<span class="badge ${badgeClass(s)}">${s.toFixed(3)}</span>` : '<span class="neu">–</span>'}</td>
+        <td class="col-skill">${skillHTML}</td>
+        <td><span class="edge" title="${esc(edge)}">${esc(edgeTrunc) || '<span class="neu">–</span>'}</span></td>
+        <td><div class="flags">${flags.length ? flags.map(f => pill(f)).join('') : '<span class="neu" style="font-size:12px">–</span>'}</div></td>
+      </tr>`;
+    }
+
+    // ── Build detail row ──────────────────────────────────────────────────────
+
+    function buildDetail(w) {
+      const m  = w.metrics || {};
+      const hf = w.heuristic_red_flags || [];
+      const cf = w.claude_red_flags || [];
+
+      const dm = (label, val) =>
+        `<div><div class="dm-label">${label}</div><div class="dm-value">${val}</div></div>`;
+
+      const edgeSec = w.edge_hypothesis
+        ? `<div class="detail-sec">
+             <div class="detail-sec-label">Edge Hypothesis</div>
+             <div class="detail-sec-body">${esc(w.edge_hypothesis)}</div>
+           </div>` : '';
+
+      const notesSec = w.claude_notes
+        ? `<div class="detail-sec">
+             <div class="detail-sec-label">Claude Notes</div>
+             <div class="detail-sec-body">${esc(w.claude_notes)}</div>
+           </div>` : '';
+
+      const flagsSec = (hf.length || cf.length)
+        ? `<div class="detail-sec">
+             <div class="detail-sec-label">Red Flags</div>
+             <div class="detail-flags">
+               ${hf.map(f => pill(f, 'k')).join('')}
+               ${cf.map(f => pill(f)).join('')}
+             </div>
+           </div>` : '';
+
+      return `<tr class="detail-row">
+        <td colspan="8" class="detail-cell">
+          <div class="detail-inner">
+            <div class="detail-metrics">
+              ${dm('Trade Count',        m.trade_count ?? '–')}
+              ${dm('Total P&amp;L',      fmtPnl(m.total_pnl))}
+              ${dm('Total Volume',       fmtUsd(m.total_volume))}
+              ${dm('Market Count',       m.market_count ?? '–')}
+              ${dm('Realized Pos.',      m.realized_position_count ?? '–')}
+              ${dm('Unresolved Pos.',    m.unresolved_position_count ?? '–')}
+              ${dm('P&amp;L from Top 3', fmtPct(m.pct_pnl_from_top_3_positions))}
+              ${dm('Portfolio Value',    m.portfolio_value != null ? fmtUsd(m.portfolio_value) : '–')}
+            </div>
+            ${edgeSec}
+            ${notesSec}
+            ${flagsSec}
+            <div class="detail-actions">
+              <a class="action-link" href="https://polymarket.com/profile/${w.address}" target="_blank" rel="noopener noreferrer">View on Polymarket ↗</a>
+              <button class="action-link" onclick="copyAddr(event,'${w.address}')">Copy full address</button>
+            </div>
+          </div>
+        </td>
+      </tr>`;
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────────
+
+    function render() {
+      const rows = getSorted().map(w =>
+        buildRow(w) + (openAddr === w.address ? buildDetail(w) : '')
+      ).join('');
+
+      document.getElementById('main').innerHTML =
+        `<div class="table-wrap">
+           <table>
+             <thead>${buildThead()}</thead>
+             <tbody>${rows}</tbody>
+           </table>
+         </div>`;
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+
+    async function init() {
+      try {
+        const res = await fetch('/api/leaderboard?limit=50');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+
+        // Handle both array (legacy) and object (current) response shape
+        wallets = Array.isArray(data) ? data : (data.wallets || []);
+        const meta = Array.isArray(data) ? null : (data.meta || null);
+
+        // Render header meta
+        const metaEl = document.getElementById('meta');
+        const parts = [];
+        if (meta && meta.last_ranked_at) parts.push('Updated ' + timeAgo(meta.last_ranked_at));
+        if (meta && meta.total)          parts.push(`Showing top ${wallets.length} of ${meta.total} ranked wallets`);
+        metaEl.innerHTML = parts.map(p => `<span>${esc(p)}</span>`).join('');
+
+        if (!wallets.length) {
+          document.getElementById('main').innerHTML =
+            '<div class="state-msg">No data yet — first scan in progress. Check back in an hour.</div>';
+          return;
+        }
+
+        render();
+      } catch (err) {
+        document.getElementById('main').innerHTML =
+          '<div class="state-msg">Failed to load leaderboard. Please refresh the page.</div>';
+        console.error(err);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
