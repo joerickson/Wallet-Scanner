@@ -165,31 +165,33 @@ When adding new functionality, prefer extending an existing module over creating
 - textual: https://textual.textualize.io/
 - FastAPI: https://fastapi.tiangolo.com/
 
-## Auth (Neon Auth — Better Auth backend)
+## Auth (Neon Auth — JWT-validated, decoupled architecture)
 
-The hosted dashboard uses Google OAuth via **Neon Auth**, which is powered by Better Auth.
-**Do NOT use legacy Stack Auth** (`@stackframe/stack`, `api.stack-auth.com`, `STACK_*` vars) — those are not configured for this project and will 404.
+The hosted dashboard uses Neon Auth (powered by Better Auth) for sign-in. The architecture is **decoupled**: the frontend talks to Neon Auth directly; the backend validates JWTs locally via JWKS. There is no auth proxy through our FastAPI backend.
+
+**Do NOT recreate the old proxy pattern** (`/api/auth/*` routes that forwarded requests to Neon Auth). That pattern was removed because it required `python-multipart`, added latency on every request, and coupled availability to Neon Auth being reachable from the server. The previous architectural mistake was: `browser → our FastAPI → Neon Auth`. The correct pattern is: `browser → Neon Auth directly`, then `browser → our FastAPI with JWT`.
 
 ### How it works
 
-1. User visits `/` → FastAPI checks the `better-auth.session_token` cookie → if missing/invalid, redirects to `/login`.
-2. `/login` page shows a "Sign in with Google" button (link to `/api/auth/login?provider=google`) and an email/password form (POST to `/api/auth/login/email`).
-3. For Google OAuth: `api/auth.py` calls `POST {NEON_AUTH_BASE_URL}/sign-in/social` to get the provider redirect URL.
-4. For email sign-in: `api/auth.py` calls `POST {NEON_AUTH_BASE_URL}/sign-in/email`; for sign-up: `POST {NEON_AUTH_BASE_URL}/sign-up/email`. On success, the session token is extracted from the response and set as the `better-auth.session_token` cookie.
-5. After Google OAuth, Neon Auth handles the callback and redirects the browser to `/api/auth/callback` on our app.
-6. FastAPI validates the session by forwarding the `better-auth.session_token` cookie to `GET {NEON_AUTH_BASE_URL}/get-session`.
-7. Every protected endpoint calls `validate_session()` which hits the Neon Auth session endpoint.
+1. User visits `/login` → frontend JavaScript fetches `/api/config` to get `NEON_AUTH_BASE_URL`.
+2. For email sign-in/sign-up: frontend calls `POST {NEON_AUTH_BASE_URL}/sign-in/email` or `/sign-up/email` **directly** → Neon Auth returns `{ token: "eyJ..." }` (a JWT).
+3. For Google OAuth: frontend calls `POST {NEON_AUTH_BASE_URL}/sign-in/social` → gets a Google redirect URL → browser navigates to Google → after OAuth, Neon Auth redirects back to `/login?oauth_callback=1` → frontend calls `GET {NEON_AUTH_BASE_URL}/get-session` with `credentials: 'include'` to retrieve the JWT.
+4. JWT is stored in `localStorage` as `auth_token`.
+5. Every API call from the frontend includes `Authorization: Bearer <jwt>`.
+6. FastAPI's `require_auth` dependency validates the JWT signature via Neon Auth's JWKS endpoint (`{NEON_AUTH_BASE_URL}/.well-known/jwks.json`) using `PyJWT` + `PyJWKClient`. No network call to Neon Auth per request — JWKS keys are cached.
+7. User identity (`sub` claim = user ID) is extracted from the validated JWT payload.
 
 ### Required Vercel env vars
 
 | Variable | Where to find |
 |---|---|
 | `NEON_AUTH_BASE_URL` | Neon Console → Auth → Configuration → Auth URL |
-| `NEON_AUTH_COOKIE_SECRET` | Generate with `openssl rand -base64 32` |
+
+`NEON_AUTH_COOKIE_SECRET` is **not** needed — cookies are managed by Neon Auth's own domain; we use JWTs, not session cookies.
 
 ### Local development
 
-Leave both `NEON_AUTH_*` vars unset. `AUTH_ENABLED` in `api/auth.py` will be `False`, and every request is treated as a synthetic `local-dev` user. No OAuth flow is triggered.
+Leave `NEON_AUTH_BASE_URL` unset. `AUTH_ENABLED` in `api/auth.py` will be `False`. `/api/config` returns `{ "neon_auth_url": "" }`, so the login page immediately redirects to `/`. Every API call is treated as the `local-dev` user — no OAuth flow is triggered.
 
 ### OAuth providers currently enabled
 
@@ -199,18 +201,19 @@ Leave both `NEON_AUTH_*` vars unset. `AUTH_ENABLED` in `api/auth.py` will be `Fa
 
 ### Protected routes
 
-All `/api/*` routes except `/api/health` require a valid session. The GitHub Actions scheduler writes directly to Postgres via `DATABASE_URL` — it never touches the API, so it is unaffected by auth.
+All `/api/*` routes except `/api/health` and `/api/config` require a valid JWT (`Depends(require_auth)`). The GitHub Actions scheduler writes directly to Postgres via `DATABASE_URL` — it never touches the API, so it is unaffected by auth.
 
 ### User-scoped data
 
-User identity comes from the `id` field returned by Neon Auth's get-session endpoint (a string UUID from Better Auth, stable per provider account). This is stored as `user_id` in the `user_watchlist` table. User records are managed by Neon Auth in the `neon_auth.user` schema; we store only the `id` reference.
+User identity comes from the `sub` claim of the validated JWT (a stable UUID from Neon Auth per provider account). This is stored as `user_id` in the `user_watchlist` table.
 
 ### Post-deploy checklist
 
 After deploying to Vercel:
-1. Add `NEON_AUTH_BASE_URL` and `NEON_AUTH_COOKIE_SECRET` to Vercel env vars.
+1. Add `NEON_AUTH_BASE_URL` to Vercel env vars.
 2. Add `predictionscanner.io` to trusted domains: Neon Console → Auth → Configuration → Domains.
-3. Redeploy and test the Google sign-in flow.
+3. Redeploy and test email sign-in and Google sign-in flows.
+4. Verify: `/api/leaderboard` with no Bearer header → 401; with valid JWT → 200.
 
 ## Scheduled scans
 

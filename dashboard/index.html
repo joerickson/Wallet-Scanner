@@ -898,6 +898,30 @@
   <div id="toast"></div>
 
   <script>
+    // ── Auth helpers ──────────────────────────────────────────────────────────
+
+    function getAuthToken() {
+      return localStorage.getItem('auth_token') || '';
+    }
+
+    function getAuthHeaders(extra) {
+      const token = getAuthToken();
+      const auth = token ? { 'Authorization': 'Bearer ' + token } : {};
+      return Object.assign(auth, extra || {});
+    }
+
+    function parseJwt(token) {
+      try {
+        const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+        return JSON.parse(window.atob(base64));
+      } catch(e) { return null; }
+    }
+
+    function signOut() {
+      localStorage.removeItem('auth_token');
+      window.location.href = '/login';
+    }
+
     // ── Flag config ───────────────────────────────────────────────────────────
 
     const FLAG_SEV = {
@@ -986,13 +1010,13 @@
       const watching = w.is_watched;
       try {
         if (watching) {
-          await fetch('/api/watchlist/' + addr, { method: 'DELETE' });
+          await fetch('/api/watchlist/' + addr, { method: 'DELETE', headers: getAuthHeaders() });
           w.is_watched = false;
           w.new_activity_count = 0;
         } else {
           await fetch('/api/watchlist', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ wallet_address: addr }),
           });
           w.is_watched = true;
@@ -1140,7 +1164,7 @@
 
         // Mark watched wallet as seen
         if (w && w.is_watched && (w.new_activity_count || 0) > 0) {
-          fetch('/api/watchlist/' + addr + '/seen', { method: 'POST' })
+          fetch('/api/watchlist/' + addr + '/seen', { method: 'POST', headers: getAuthHeaders() })
             .then(() => {
               w.new_activity_count = 0;
               watchlistSummary = computeLocalSummary();
@@ -1172,7 +1196,7 @@
     // ── Strategy fetching ─────────────────────────────────────────────────────
 
     function fetchStrategy(addr, dataMap, loadingSet, errorMap) {
-      fetch('/api/wallet/' + addr + '/strategy')
+      fetch('/api/wallet/' + addr + '/strategy', { headers: getAuthHeaders() })
         .then(res => {
           if (res.status === 404) { dataMap.set(addr, null); return; }
           if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -1203,7 +1227,7 @@
       regenState.set(addr, { loading: true, jobId: null, pollTimerId: null, error: null, rateLimited: false });
       render();
 
-      fetch('/api/wallet/' + addr + '/strategy/regenerate', { method: 'POST' })
+      fetch('/api/wallet/' + addr + '/strategy/regenerate', { method: 'POST', headers: getAuthHeaders() })
         .then(res => {
           if (res.status === 429) {
             regenState.set(addr, { loading: false, jobId: null, pollTimerId: null, error: null, rateLimited: true });
@@ -1227,7 +1251,7 @@
       const state = regenState.get(addr);
       if (!state || !state.jobId) return;
 
-      fetch('/api/jobs/' + state.jobId)
+      fetch('/api/jobs/' + state.jobId, { headers: getAuthHeaders() })
         .then(res => res.json())
         .then(data => {
           if (data.status === 'complete') {
@@ -1259,7 +1283,7 @@
       historyExpanded.add(addr);
       if (!historyData.has(addr) && !historyLoading.has(addr)) {
         historyLoading.add(addr);
-        fetch('/api/wallet/' + addr + '/strategy/history')
+        fetch('/api/wallet/' + addr + '/strategy/history', { headers: getAuthHeaders() })
           .then(res => res.ok ? res.json() : Promise.reject('HTTP ' + res.status))
           .then(data => { historyData.set(addr, data); })
           .catch(e => { historyError.set(addr, String(e)); })
@@ -1810,21 +1834,23 @@
     // ── Init ──────────────────────────────────────────────────────────────────
 
     async function init() {
-      // Load user info for the header and auth state (non-blocking)
-      fetch('/api/auth/me').then(r => {
-        if (r.ok) return r.json();
-      }).then(me => {
-        if (!me) return;
-        currentUser = me;
-        const email = me.email || me.name || 'you';
-        document.getElementById('user-info').innerHTML =
-          `<span>Signed in as ${esc(email)}</span>` +
-          `<a href="/api/auth/signout">Sign out</a>`;
-      }).catch(() => {});
+      // Show user info from JWT (non-blocking — JWT is already in localStorage)
+      const token = getAuthToken();
+      if (token) {
+        const payload = parseJwt(token);
+        if (payload) {
+          currentUser = { id: payload.sub, email: payload.email, name: payload.name };
+          const email = currentUser.email || currentUser.name || 'you';
+          document.getElementById('user-info').innerHTML =
+            `<span>Signed in as ${esc(email)}</span>` +
+            `<a href="#" onclick="signOut(); return false;">Sign out</a>`;
+        }
+      }
 
       try {
-        const res = await fetch('/api/leaderboard?limit=50');
+        const res = await fetch('/api/leaderboard?limit=50', { headers: getAuthHeaders() });
         if (res.status === 401) {
+          localStorage.removeItem('auth_token');
           window.location.href = '/login';
           return;
         }

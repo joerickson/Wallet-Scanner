@@ -76,6 +76,7 @@
     }
 
     .btn:last-child { margin-bottom: 0; }
+    .btn:disabled { opacity: 0.6; cursor: default; }
 
     .divider {
       display: flex;
@@ -136,7 +137,7 @@
     <p class="sub">Sign in to view the leaderboard</p>
     <div class="error" id="error-msg"></div>
 
-    <a class="btn" href="/api/auth/login?provider=google">
+    <button type="button" class="btn" id="google-btn" onclick="signInWithGoogle(event)">
       <!-- Google "G" logo -->
       <svg width="18" height="18" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
         <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -145,16 +146,16 @@
         <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
       </svg>
       Sign in with Google
-    </a>
+    </button>
 
     <div class="divider">or</div>
 
-    <form id="email-form" method="POST" action="/api/auth/login/email">
+    <form id="email-form">
       <input type="hidden" name="action" id="form-action" value="signin" />
       <div id="name-field" style="display:none">
         <input type="text" name="name" id="name-input" placeholder="Your name" class="input" autocomplete="name" />
       </div>
-      <input type="email" name="email" placeholder="Email" required class="input" autocomplete="email" />
+      <input type="email" name="email" id="email-input" placeholder="Email" required class="input" autocomplete="email" />
       <input type="password" name="password" id="password-input" placeholder="Password" required class="input" autocomplete="current-password" />
       <button type="submit" class="btn btn-primary" id="submit-btn">Sign in with Email</button>
     </form>
@@ -167,11 +168,117 @@
   </div>
 
   <script>
-    const params = new URLSearchParams(location.search);
-    const err = params.get('error');
-    if (err) {
-      document.getElementById('error-msg').textContent =
-        'Sign-in failed: ' + err.replace(/_/g, ' ');
+    // Neon Auth base URL — loaded from /api/config on init
+    let _neonAuthUrl = '';
+
+    function setError(msg) {
+      document.getElementById('error-msg').textContent = msg || '';
+    }
+
+    function parseJwt(token) {
+      try {
+        const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+        return JSON.parse(window.atob(base64));
+      } catch(e) { return null; }
+    }
+
+    // Called when returning from Google OAuth flow
+    async function handleOAuthCallback() {
+      // Try to get the session token from Neon Auth cross-origin.
+      // This works if Neon Auth has CORS + SameSite=None cookies configured.
+      try {
+        const res = await fetch(_neonAuthUrl + '/get-session', { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          const token = (data.session && data.session.token) || data.token;
+          if (token) {
+            localStorage.setItem('auth_token', token);
+            window.location.replace('/');
+            return;
+          }
+        }
+      } catch(e) {}
+      setError('OAuth sign-in failed. Please try again.');
+      history.replaceState({}, '', '/login');
+    }
+
+    // Initiate Google OAuth — calls Neon Auth directly, redirects to Google
+    async function signInWithGoogle(e) {
+      e.preventDefault();
+      setError('');
+      const btn = document.getElementById('google-btn');
+      btn.disabled = true;
+      try {
+        const res = await fetch(_neonAuthUrl + '/sign-in/social', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            provider: 'google',
+            callbackURL: window.location.origin + '/login?oauth_callback=1'
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        const redirectUrl = data.url || data.redirect;
+        if (redirectUrl) {
+          window.location.href = redirectUrl;
+        } else {
+          setError('Failed to initiate Google sign-in');
+          btn.disabled = false;
+        }
+      } catch(err) {
+        setError('Network error. Please try again.');
+        btn.disabled = false;
+      }
+    }
+
+    // Handle email sign-in or sign-up — calls Neon Auth directly
+    async function handleEmailSubmit(e) {
+      e.preventDefault();
+      setError('');
+      const action = document.getElementById('form-action').value;
+      const email = document.getElementById('email-input').value.trim();
+      const password = document.getElementById('password-input').value;
+      const btn = document.getElementById('submit-btn');
+      btn.disabled = true;
+
+      try {
+        let url, body;
+        if (action === 'signup') {
+          const name = (document.getElementById('name-input').value || '').trim()
+            || email.split('@')[0];
+          url = _neonAuthUrl + '/sign-up/email';
+          body = { email, password, name };
+        } else {
+          url = _neonAuthUrl + '/sign-in/email';
+          body = { email, password, rememberMe: true };
+        }
+
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body)
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(data.message || 'Authentication failed');
+          return;
+        }
+
+        const token = data.token;
+        if (!token) {
+          setError('No token returned from authentication service');
+          return;
+        }
+        localStorage.setItem('auth_token', token);
+        window.location.replace('/');
+      } catch(err) {
+        setError('Network error. Please try again.');
+      } finally {
+        btn.disabled = false;
+      }
     }
 
     function toggleMode() {
@@ -194,6 +301,43 @@
         document.getElementById('password-input').autocomplete = 'current-password';
       }
     }
+
+    async function init() {
+      // Load Neon Auth URL from backend
+      try {
+        const res = await fetch('/api/config');
+        const data = await res.json();
+        _neonAuthUrl = (data.neon_auth_url || '').replace(/\/$/, '');
+      } catch(e) {}
+
+      if (!_neonAuthUrl) {
+        // Auth not configured (local dev) — go straight to dashboard
+        window.location.replace('/');
+        return;
+      }
+
+      // Handle OAuth callback
+      const params = new URLSearchParams(location.search);
+      if (params.get('oauth_callback')) {
+        await handleOAuthCallback();
+        return;
+      }
+
+      // Redirect to dashboard if already signed in with a non-expired token
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        const payload = parseJwt(token);
+        if (payload && payload.exp && payload.exp * 1000 > Date.now()) {
+          window.location.replace('/');
+          return;
+        }
+        localStorage.removeItem('auth_token');
+      }
+
+      document.getElementById('email-form').addEventListener('submit', handleEmailSubmit);
+    }
+
+    init();
   </script>
 </body>
 </html>
