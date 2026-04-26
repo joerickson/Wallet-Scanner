@@ -77,6 +77,52 @@
 
     .btn:last-child { margin-bottom: 0; }
 
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 16px 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .input {
+      width: 100%;
+      padding: 9px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 14px;
+      margin-bottom: 8px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .input:focus { border-color: var(--blue); }
+    .input::placeholder { color: var(--muted); }
+
+    .btn-primary {
+      background: var(--blue);
+      color: #0d1117;
+      border-color: var(--blue);
+      font-weight: 600;
+    }
+    .btn-primary:hover { background: #79b8ff; border-color: #79b8ff; }
+
+    .toggle-link {
+      margin-top: 12px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .toggle-link a { color: var(--blue); text-decoration: none; }
+    .toggle-link a:hover { text-decoration: underline; }
+
     .footer {
       margin-top: 24px;
       font-size: 11px;
@@ -101,6 +147,22 @@
       Sign in with Google
     </a>
 
+    <div class="divider">or</div>
+
+    <form id="email-form" method="POST" action="/api/auth/login/email">
+      <input type="hidden" name="action" id="form-action" value="signin" />
+      <div id="name-field" style="display:none">
+        <input type="text" name="name" id="name-input" placeholder="Your name" class="input" autocomplete="name" />
+      </div>
+      <input type="email" name="email" placeholder="Email" required class="input" autocomplete="email" />
+      <input type="password" name="password" id="password-input" placeholder="Password" required class="input" autocomplete="current-password" />
+      <button type="submit" class="btn btn-primary" id="submit-btn">Sign in with Email</button>
+    </form>
+    <p class="toggle-link">
+      <span id="toggle-text">Don't have an account?</span>
+      <a href="#" id="toggle-link" onclick="toggleMode(); return false;">Sign Up</a>
+    </p>
+
     <p class="footer">predictionscanner.io</p>
   </div>
 
@@ -110,6 +172,27 @@
     if (err) {
       document.getElementById('error-msg').textContent =
         'Sign-in failed: ' + err.replace(/_/g, ' ');
+    }
+
+    function toggleMode() {
+      const isSignIn = document.getElementById('form-action').value === 'signin';
+      if (isSignIn) {
+        document.getElementById('form-action').value = 'signup';
+        document.getElementById('name-field').style.display = '';
+        document.getElementById('name-input').required = true;
+        document.getElementById('submit-btn').textContent = 'Sign up with Email';
+        document.getElementById('toggle-text').textContent = 'Already have an account?';
+        document.getElementById('toggle-link').textContent = 'Sign In';
+        document.getElementById('password-input').autocomplete = 'new-password';
+      } else {
+        document.getElementById('form-action').value = 'signin';
+        document.getElementById('name-field').style.display = 'none';
+        document.getElementById('name-input').required = false;
+        document.getElementById('submit-btn').textContent = 'Sign in with Email';
+        document.getElementById('toggle-text').textContent = "Don't have an account?";
+        document.getElementById('toggle-link').textContent = 'Sign Up';
+        document.getElementById('password-input').autocomplete = 'current-password';
+      }
     }
   </script>
 </body>

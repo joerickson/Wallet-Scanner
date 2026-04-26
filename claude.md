@@ -173,11 +173,12 @@ The hosted dashboard uses Google OAuth via **Neon Auth**, which is powered by Be
 ### How it works
 
 1. User visits `/` → FastAPI checks the `better-auth.session_token` cookie → if missing/invalid, redirects to `/login`.
-2. `/login` page shows a "Sign in with Google" button (link to `/api/auth/login?provider=google`).
-3. `api/auth.py` calls `POST {NEON_AUTH_BASE_URL}/api/auth/sign-in/social` to get the Google OAuth redirect URL.
-4. After Google OAuth, Neon Auth handles the callback and redirects the browser to `/api/auth/callback` on our app.
-5. FastAPI validates the session by forwarding the `better-auth.session_token` cookie to `GET {NEON_AUTH_BASE_URL}/api/auth/get-session`.
-6. Every protected endpoint calls `validate_session()` which hits the Neon Auth session endpoint.
+2. `/login` page shows a "Sign in with Google" button (link to `/api/auth/login?provider=google`) and an email/password form (POST to `/api/auth/login/email`).
+3. For Google OAuth: `api/auth.py` calls `POST {NEON_AUTH_BASE_URL}/sign-in/social` to get the provider redirect URL.
+4. For email sign-in: `api/auth.py` calls `POST {NEON_AUTH_BASE_URL}/sign-in/email`; for sign-up: `POST {NEON_AUTH_BASE_URL}/sign-up/email`. On success, the session token is extracted from the response and set as the `better-auth.session_token` cookie.
+5. After Google OAuth, Neon Auth handles the callback and redirects the browser to `/api/auth/callback` on our app.
+6. FastAPI validates the session by forwarding the `better-auth.session_token` cookie to `GET {NEON_AUTH_BASE_URL}/get-session`.
+7. Every protected endpoint calls `validate_session()` which hits the Neon Auth session endpoint.
 
 ### Required Vercel env vars
 

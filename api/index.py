@@ -8,7 +8,7 @@ from datetime import datetime
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from api.auth import AUTH_ENABLED, handle_callback, require_auth, signout_response, start_oauth, validate_session
+from api.auth import AUTH_ENABLED, handle_callback, require_auth, signout_response, start_email_signin, start_email_signup, start_oauth, validate_session
 from config import STRATEGY_REGEN_DAILY_LIMIT
 from data.database import init_db
 from scanner import repository as repo
@@ -51,6 +51,20 @@ async def auth_login(request: Request, provider: str = "google"):
     if provider not in ("google",):
         raise HTTPException(status_code=400, detail="Provider must be 'google'")
     return await start_oauth(request, provider)
+
+
+@app.post("/api/auth/login/email")
+async def auth_login_email(request: Request):
+    form_data = await request.form()
+    action = str(form_data.get("action") or "signin")
+    email = (str(form_data.get("email") or "")).strip()
+    password = str(form_data.get("password") or "")
+    if not email or not password:
+        return RedirectResponse("/login?error=missing_credentials", status_code=302)
+    if action == "signup":
+        name = (str(form_data.get("name") or "")).strip()
+        return await start_email_signup(request, email, password, name)
+    return await start_email_signin(request, email, password)
 
 
 @app.get("/api/auth/callback")

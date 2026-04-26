@@ -39,7 +39,7 @@ async def start_oauth(request: Request, provider: str) -> RedirectResponse:
     async with httpx.AsyncClient() as client:
         try:
             r = await client.post(
-                f"{NEON_AUTH_BASE_URL}/api/auth/sign-in/social",
+                f"{NEON_AUTH_BASE_URL}/sign-in/social",
                 json={"provider": provider, "callbackURL": callback_url},
                 headers={"content-type": "application/json"},
                 timeout=10.0,
@@ -86,7 +86,7 @@ async def validate_session(request: Request) -> Optional[dict]:
     returns the local-dev sentinel user so the app is usable without OAuth.
 
     Validates by forwarding the better-auth.session_token cookie (or an
-    Authorization: Bearer token) to Neon Auth's GET /api/auth/get-session.
+    Authorization: Bearer token) to Neon Auth's GET /get-session.
     """
     if not AUTH_ENABLED:
         return _LOCAL_DEV_USER
@@ -108,7 +108,7 @@ async def validate_session(request: Request) -> Optional[dict]:
     async with httpx.AsyncClient() as client:
         try:
             r = await client.get(
-                f"{NEON_AUTH_BASE_URL}/api/auth/get-session",
+                f"{NEON_AUTH_BASE_URL}/get-session",
                 headers=headers,
                 timeout=5.0,
             )
@@ -136,6 +136,60 @@ async def require_auth(request: Request) -> dict:
     return user
 
 
+async def _email_auth(request: Request, endpoint: str, payload: dict) -> RedirectResponse:
+    """POST to a Better Auth email endpoint and set the session cookie on success."""
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.post(
+                f"{NEON_AUTH_BASE_URL}/{endpoint}",
+                json=payload,
+                headers={"content-type": "application/json"},
+                timeout=10.0,
+            )
+        except httpx.RequestError:
+            return RedirectResponse("/login?error=network_error", status_code=302)
+
+    if r.status_code in (200, 201):
+        data = r.json()
+        token = data.get("token")
+        if token:
+            is_secure = _base_url(request).startswith("https://")
+            response = RedirectResponse("/", status_code=302)
+            response.set_cookie(
+                SESSION_COOKIE,
+                token,
+                max_age=COOKIE_MAX_AGE,
+                httponly=True,
+                secure=is_secure,
+                samesite="lax",
+            )
+            return response
+
+    try:
+        error_msg = r.json().get("message", "auth_failed").replace(" ", "_").lower()
+    except Exception:
+        error_msg = "auth_failed"
+    return RedirectResponse(f"/login?error={error_msg}", status_code=302)
+
+
+async def start_email_signin(request: Request, email: str, password: str) -> RedirectResponse:
+    """Sign in with email and password via Better Auth."""
+    return await _email_auth(
+        request,
+        "sign-in/email",
+        {"email": email, "password": password, "rememberMe": True},
+    )
+
+
+async def start_email_signup(request: Request, email: str, password: str, name: str) -> RedirectResponse:
+    """Create an account and sign in via Better Auth."""
+    return await _email_auth(
+        request,
+        "sign-up/email",
+        {"email": email, "password": password, "name": name or email.split("@")[0]},
+    )
+
+
 async def signout_response(request: Request) -> RedirectResponse:
     """Invalidate the Neon Auth session and clear the local session cookie."""
     token = request.cookies.get(SESSION_COOKIE)
@@ -143,7 +197,7 @@ async def signout_response(request: Request) -> RedirectResponse:
         async with httpx.AsyncClient() as client:
             try:
                 await client.post(
-                    f"{NEON_AUTH_BASE_URL}/api/auth/sign-out",
+                    f"{NEON_AUTH_BASE_URL}/sign-out",
                     headers={"cookie": f"{SESSION_COOKIE}={token}"},
                     timeout=5.0,
                 )
