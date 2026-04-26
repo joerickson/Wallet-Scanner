@@ -46,6 +46,9 @@ class Position(SQLModel, table=True):
     redeemable: bool = Field(default=False)
     end_date: Optional[datetime] = Field(default=None)
     fetched_at: datetime = Field(default_factory=datetime.utcnow)
+    first_seen_at: datetime = Field(default_factory=datetime.utcnow)
+    last_seen_at: datetime = Field(default_factory=datetime.utcnow)
+    is_active: bool = Field(default=True)
 
 
 class WalletMetrics(SQLModel, table=True):

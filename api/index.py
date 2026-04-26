@@ -85,6 +85,7 @@ def health() -> dict:
 @app.get("/api/leaderboard")
 async def leaderboard(limit: int = 50, user: dict = Depends(require_auth)) -> dict:
     watched = repo.get_watched_addresses_for_user(user["id"])
+    activity_counts = repo.get_activity_counts_for_user(user["id"])
     rows = repo.get_top_rankings(limit=min(limit, 200))
     total = repo.get_rankings_count()
     max_ranked_at = max((r.ranked_at for r in rows), default=None)
@@ -119,6 +120,7 @@ async def leaderboard(limit: int = 50, user: dict = Depends(require_auth)) -> di
             "claude_red_flags": claude_flags,
             "red_flags": heuristic_flags + claude_flags,
             "is_watched": r.wallet_address in watched,
+            "new_activity_count": activity_counts.get(r.wallet_address, 0),
             "metrics": {
                 "trade_count": metrics.trade_count,
                 "total_pnl": metrics.total_pnl,
@@ -170,6 +172,28 @@ async def remove_watchlist(address: str, user: dict = Depends(require_auth)) -> 
     if not removed:
         raise HTTPException(status_code=404, detail="Entry not found in watchlist")
     return {"removed": True, "wallet_address": address}
+
+
+@app.get("/api/watchlist/summary")
+async def watchlist_summary(user: dict = Depends(require_auth)) -> dict:
+    entries = repo.get_user_watchlist(user["id"])
+    activity = repo.get_activity_counts_for_user(user["id"])
+    watched_count = len(entries)
+    wallets_with_new = sum(1 for count in activity.values() if count > 0)
+    total_new = sum(activity.values())
+    return {
+        "watched_count": watched_count,
+        "wallets_with_new_activity": wallets_with_new,
+        "total_new_positions": total_new,
+    }
+
+
+@app.post("/api/watchlist/{address}/seen")
+async def mark_wallet_seen(address: str, user: dict = Depends(require_auth)) -> dict:
+    updated = repo.update_watchlist_last_seen(user["id"], address)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Entry not found in watchlist")
+    return {"updated": True, "wallet_address": address}
 
 
 @app.get("/api/alerts")
