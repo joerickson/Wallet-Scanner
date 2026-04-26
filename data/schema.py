@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -132,3 +132,64 @@ class UserWatchlist(SQLModel, table=True):
     last_seen_at: datetime = Field(default_factory=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "wallet_address"),)
+
+
+class WalletStrategyAnalysis(SQLModel, table=True):
+    """Deep Claude strategy analysis for a wallet — tracks replicability over time."""
+
+    __tablename__ = "wallet_strategy_analysis"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    wallet_address: str = Field(foreign_key="wallet.address", index=True)
+
+    # Replicability assessment
+    is_replicable: bool
+    replicability_confidence: float
+    capital_required_min_usd: Optional[int] = Field(default=None)
+
+    # Strategy classification
+    strategy_type: str
+    strategy_subtype: Optional[str] = Field(default=None)
+
+    # Replication blueprint
+    entry_signal: str
+    exit_signal: str
+    position_sizing_rule: str
+    market_selection_criteria: str
+    infrastructure_required: str
+
+    # Performance characterization
+    estimated_hit_rate: Optional[float] = Field(default=None)
+    estimated_avg_hold_time_hours: Optional[float] = Field(default=None)
+    estimated_sharpe_proxy: Optional[float] = Field(default=None)
+
+    # Risk assessment (JSON-encoded list[str])
+    failure_modes: str = Field(default="[]")
+    risk_factors: str = Field(default="[]")
+
+    # Meta
+    prompt_version: str
+    model_used: str
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    wallet_state_snapshot: str = Field(default="{}")  # JSON-encoded dict
+
+    # Long-form sections
+    full_thesis: str
+    paper_trade_recommendation: str
+
+    __table_args__ = (Index("ix_strategy_wallet_generated", "wallet_address", "generated_at"),)
+
+
+class ClaudeUsageLog(SQLModel, table=True):
+    """Tracks every Claude API call for cost monitoring."""
+
+    __tablename__ = "claude_usage_log"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    call_type: str  # "strategy_analysis" | "scanner_review"
+    wallet_address: Optional[str] = Field(default=None)
+    model_used: str
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+    logged_at: datetime = Field(default_factory=datetime.utcnow)

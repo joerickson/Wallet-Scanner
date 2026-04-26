@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import pathlib
+import uuid
+from datetime import datetime
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from api.auth import AUTH_ENABLED, handle_callback, require_auth, signout_response, start_oauth, validate_session
+from config import STRATEGY_REGEN_DAILY_LIMIT
 from data.database import init_db
 from scanner import repository as repo
 
@@ -78,7 +81,18 @@ def health() -> dict:
     except Exception:
         total = 0
         last_scan_at = None
-    return {"status": "ok", "ranked_wallet_count": total, "last_scan_at": last_scan_at}
+
+    try:
+        claude_usage = repo.get_monthly_claude_usage()
+    except Exception:
+        claude_usage = None
+
+    return {
+        "status": "ok",
+        "ranked_wallet_count": total,
+        "last_scan_at": last_scan_at,
+        "claude_usage_this_month": claude_usage,
+    }
 
 
 @app.get("/api/leaderboard")
@@ -212,6 +226,141 @@ async def alerts(limit: int = 50, user: dict = Depends(require_auth)) -> list[di
         }
         for a in rows
     ]
+
+
+# ── Strategy analysis endpoints ───────────────────────────────────────────────
+
+# In-memory job tracking: job_id -> {status, result, error, created_at}
+_jobs: dict[str, dict] = {}
+
+# Rate limit tracking: user_id -> {date: date, count: int}
+_regen_limits: dict[str, dict] = {}
+
+
+def _check_regen_rate_limit(user_id: str) -> bool:
+    """Return True if under the daily limit, False if exceeded. Increments counter."""
+    today = datetime.utcnow().date()
+    entry = _regen_limits.get(user_id)
+    if entry is None or entry["date"] != today:
+        _regen_limits[user_id] = {"date": today, "count": 0}
+        entry = _regen_limits[user_id]
+    if entry["count"] >= STRATEGY_REGEN_DAILY_LIMIT:
+        return False
+    entry["count"] += 1
+    return True
+
+
+def _serialize_strategy(s) -> dict:
+    return {
+        "id": s.id,
+        "wallet_address": s.wallet_address,
+        "is_replicable": s.is_replicable,
+        "replicability_confidence": s.replicability_confidence,
+        "capital_required_min_usd": s.capital_required_min_usd,
+        "strategy_type": s.strategy_type,
+        "strategy_subtype": s.strategy_subtype,
+        "entry_signal": s.entry_signal,
+        "exit_signal": s.exit_signal,
+        "position_sizing_rule": s.position_sizing_rule,
+        "market_selection_criteria": s.market_selection_criteria,
+        "infrastructure_required": s.infrastructure_required,
+        "estimated_hit_rate": s.estimated_hit_rate,
+        "estimated_avg_hold_time_hours": s.estimated_avg_hold_time_hours,
+        "estimated_sharpe_proxy": s.estimated_sharpe_proxy,
+        "failure_modes": _json_list(s.failure_modes),
+        "risk_factors": _json_list(s.risk_factors),
+        "prompt_version": s.prompt_version,
+        "model_used": s.model_used,
+        "generated_at": s.generated_at.isoformat(),
+        "wallet_state_snapshot": _json_dict(s.wallet_state_snapshot),
+        "full_thesis": s.full_thesis,
+        "paper_trade_recommendation": s.paper_trade_recommendation,
+    }
+
+
+def _json_list(value: str | None) -> list:
+    if not value:
+        return []
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _json_dict(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+@app.get("/api/wallet/{address}/strategy")
+async def get_wallet_strategy(address: str, user: dict = Depends(require_auth)) -> dict:
+    """Return the most recent strategy analysis for a wallet, or 404 if none exists."""
+    analysis = repo.get_latest_strategy_analysis(address)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="No strategy analysis found for this wallet")
+    return _serialize_strategy(analysis)
+
+
+@app.get("/api/wallet/{address}/strategy/history")
+async def get_wallet_strategy_history(address: str, user: dict = Depends(require_auth)) -> list[dict]:
+    """Return all strategy analyses for a wallet, newest first."""
+    analyses = repo.get_strategy_analysis_history(address)
+    return [_serialize_strategy(a) for a in analyses]
+
+
+@app.post("/api/wallet/{address}/strategy/regenerate")
+async def regenerate_wallet_strategy(
+    address: str,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(require_auth),
+) -> dict:
+    """Trigger fresh strategy analysis for a wallet. Rate-limited to 5/day per user.
+
+    Returns a job_id for polling at GET /api/jobs/{job_id}.
+    """
+    user_id = user.get("id", "unknown")
+    if not _check_regen_rate_limit(user_id):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily regeneration limit ({STRATEGY_REGEN_DAILY_LIMIT}) reached. Try again tomorrow.",
+        )
+
+    job_id = str(uuid.uuid4())
+    _jobs[job_id] = {"status": "pending", "result": None, "error": None, "created_at": datetime.utcnow().isoformat()}
+
+    background_tasks.add_task(_run_strategy_job, job_id, address)
+    return {"job_id": job_id, "status": "pending"}
+
+
+async def _run_strategy_job(job_id: str, address: str) -> None:
+    from analysis.strategy_analyzer import analyze_wallet_strategy
+
+    _jobs[job_id]["status"] = "running"
+    try:
+        analysis = await analyze_wallet_strategy(address)
+        if analysis is None:
+            _jobs[job_id]["status"] = "error"
+            _jobs[job_id]["error"] = "Analysis failed or returned no result"
+            return
+        saved = repo.save_strategy_analysis(analysis)
+        _jobs[job_id]["status"] = "complete"
+        _jobs[job_id]["result"] = _serialize_strategy(saved)
+    except Exception as exc:
+        _jobs[job_id]["status"] = "error"
+        _jobs[job_id]["error"] = str(exc)
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: str, user: dict = Depends(require_auth)) -> dict:
+    """Poll for async job status. Returns status and result when complete."""
+    job = _jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"job_id": job_id, **job}
 
 
 @app.get("/api/wallets/{address}")
