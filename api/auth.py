@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import time
 from typing import Optional
 
 import httpx
 from fastapi import HTTPException, Request
+
+logger = logging.getLogger(__name__)
 
 NEON_AUTH_BASE_URL = os.getenv("NEON_AUTH_BASE_URL", "").rstrip("/")
 AUTH_ENABLED = bool(NEON_AUTH_BASE_URL)
@@ -16,6 +19,7 @@ _LOCAL_DEV_USER = {"id": "local-dev", "email": "local@dev", "name": "Local Dev",
 # In-memory session cache: SHA256(token) -> (user_dict, expiry_timestamp)
 _session_cache: dict[str, tuple[dict, float]] = {}
 _CACHE_TTL = 60.0
+_logged_response_shape = False
 
 
 async def validate_session(request: Request) -> Optional[dict]:
@@ -58,12 +62,21 @@ async def validate_session(request: Request) -> Optional[dict]:
         return None
 
     if response.status_code != 200:
-        return None
+        raise HTTPException(status_code=401, detail={"error": "Authentication required"})
 
-    data = response.json()
-    user_data = data.get("user")
+    # Log the raw response shape once so we can confirm which key path Neon is using.
+    global _logged_response_shape
+    if not _logged_response_shape:
+        logger.info("Neon /get-session raw response: %s", response.text)
+        _logged_response_shape = True
+
+    parsed = response.json() if response.content else None
+    if parsed is None:
+        raise HTTPException(status_code=401, detail={"error": "Authentication required"})
+
+    user_data = parsed.get("user") or (parsed.get("session") or {}).get("user")
     if not user_data:
-        return None
+        raise HTTPException(status_code=401, detail={"error": "Authentication required"})
 
     user = {
         "id": user_data.get("id"),
