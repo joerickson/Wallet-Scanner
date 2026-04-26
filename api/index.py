@@ -6,9 +6,9 @@ import uuid
 from datetime import datetime
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 
-from api.auth import AUTH_ENABLED, handle_callback, require_auth, signout_response, start_email_signin, start_email_signup, start_oauth, validate_session
+from api.auth import AUTH_ENABLED, NEON_AUTH_BASE_URL, require_auth
 from config import STRATEGY_REGEN_DAILY_LIMIT
 from data.database import init_db
 from scanner import repository as repo
@@ -25,10 +25,8 @@ except Exception:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
-    user = await validate_session(request)
-    if not user and AUTH_ENABLED:
-        return RedirectResponse("/login", status_code=302)
+async def root():
+    # Auth is validated client-side via JWT in localStorage.
     try:
         return _DASHBOARD_HTML.read_text()
     except FileNotFoundError:
@@ -36,54 +34,17 @@ async def root(request: Request):
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    user = await validate_session(request)
-    if user and AUTH_ENABLED:
-        return RedirectResponse("/", status_code=302)
+async def login_page():
     try:
         return _LOGIN_HTML.read_text()
     except FileNotFoundError:
         return HTMLResponse("<p>Login page not found.</p>", status_code=404)
 
 
-@app.get("/api/auth/login")
-async def auth_login(request: Request, provider: str = "google"):
-    if provider not in ("google",):
-        raise HTTPException(status_code=400, detail="Provider must be 'google'")
-    return await start_oauth(request, provider)
-
-
-@app.post("/api/auth/login/email")
-async def auth_login_email(request: Request):
-    form_data = await request.form()
-    action = str(form_data.get("action") or "signin")
-    email = (str(form_data.get("email") or "")).strip()
-    password = str(form_data.get("password") or "")
-    if not email or not password:
-        return RedirectResponse("/login?error=missing_credentials", status_code=302)
-    if action == "signup":
-        name = (str(form_data.get("name") or "")).strip()
-        return await start_email_signup(request, email, password, name)
-    return await start_email_signin(request, email, password)
-
-
-@app.get("/api/auth/callback")
-async def auth_callback(request: Request):
-    return await handle_callback(request)
-
-
-@app.get("/api/auth/signout")
-async def auth_signout(request: Request):
-    return await signout_response(request)
-
-
-@app.get("/api/auth/me")
-async def auth_me(user: dict = Depends(require_auth)) -> dict:
-    return {
-        "id": user.get("id"),
-        "email": user.get("primary_email"),
-        "name": user.get("display_name"),
-    }
+@app.get("/api/config")
+def get_config() -> dict:
+    """Return public frontend configuration (Neon Auth URL for direct SDK calls)."""
+    return {"neon_auth_url": NEON_AUTH_BASE_URL if AUTH_ENABLED else ""}
 
 
 @app.get("/api/health")

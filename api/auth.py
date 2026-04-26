@@ -3,208 +3,71 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-import httpx
 from fastapi import HTTPException, Request
-from fastapi.responses import RedirectResponse
 
 NEON_AUTH_BASE_URL = os.getenv("NEON_AUTH_BASE_URL", "").rstrip("/")
-NEON_AUTH_COOKIE_SECRET = os.getenv("NEON_AUTH_COOKIE_SECRET", "")
-
-# Better Auth session cookie name
-SESSION_COOKIE = "better-auth.session_token"
-COOKIE_MAX_AGE = 30 * 24 * 3600  # 30 days
-
-# AUTH_ENABLED is True only when NEON_AUTH_BASE_URL is configured.
-# When False (local dev), every request is treated as the "local-dev" user so
-# the app runs without OAuth.
 AUTH_ENABLED = bool(NEON_AUTH_BASE_URL)
 
-_LOCAL_DEV_USER = {"id": "local-dev", "primary_email": "local@dev", "display_name": "Local Dev"}
+_LOCAL_DEV_USER = {"id": "local-dev", "email": "local@dev", "name": "Local Dev"}
+
+_jwks_client: object = None
 
 
-def _base_url(request: Request) -> str:
-    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host = request.headers.get("x-forwarded-host", request.url.netloc)
-    return f"{scheme}://{host}"
+def _get_jwks_client():
+    global _jwks_client
+    if _jwks_client is None and AUTH_ENABLED:
+        from jwt import PyJWKClient  # type: ignore
 
-
-async def start_oauth(request: Request, provider: str) -> RedirectResponse:
-    """Initiate social OAuth via Neon Auth (Better Auth).
-
-    Calls Better Auth's sign-in/social endpoint to obtain the provider redirect
-    URL, then sends the browser to the OAuth provider.
-    """
-    callback_url = f"{_base_url(request)}/api/auth/callback"
-
-    async with httpx.AsyncClient() as client:
-        try:
-            r = await client.post(
-                f"{NEON_AUTH_BASE_URL}/sign-in/social",
-                json={"provider": provider, "callbackURL": callback_url},
-                headers={"content-type": "application/json"},
-                timeout=10.0,
-                follow_redirects=False,
-            )
-        except httpx.RequestError:
-            return RedirectResponse("/login?error=network_error", status_code=302)
-
-    # Better Auth returns {"url": "https://accounts.google.com/..."} on success
-    if r.status_code in (200, 201):
-        data = r.json()
-        redirect_url = data.get("url") or data.get("redirect")
-        if redirect_url:
-            return RedirectResponse(redirect_url, status_code=302)
-    elif r.status_code in (301, 302, 307, 308):
-        location = r.headers.get("location")
-        if location:
-            return RedirectResponse(location, status_code=302)
-
-    return RedirectResponse("/login?error=auth_init_failed", status_code=302)
-
-
-async def handle_callback(request: Request) -> RedirectResponse:
-    """Post-OAuth landing point: validate session and forward to the dashboard.
-
-    After Better Auth completes the OAuth flow on the Neon Auth side, it
-    redirects the browser here.  We validate the session (forwarding the
-    better-auth.session_token cookie to Neon Auth) and go to / on success.
-
-    For this to work, the better-auth.session_token cookie must be readable by
-    this domain.  That requires NEON_AUTH_BASE_URL to share the same origin, or
-    Neon Auth's trusted-origins to be configured to set cross-origin cookies.
-    """
-    user = await validate_session(request)
-    if user:
-        return RedirectResponse("/", status_code=302)
-    return RedirectResponse("/login?error=auth_failed", status_code=302)
+        _jwks_client = PyJWKClient(f"{NEON_AUTH_BASE_URL}/.well-known/jwks.json")
+    return _jwks_client
 
 
 async def validate_session(request: Request) -> Optional[dict]:
-    """Return user dict if session is valid, else None.
+    """Return user dict if JWT is valid, else None.
 
-    When AUTH_ENABLED is False (local dev without Neon Auth configured), always
-    returns the local-dev sentinel user so the app is usable without OAuth.
+    In local dev (AUTH_ENABLED=False), always returns the local-dev sentinel so
+    the app is usable without Neon Auth configured.
 
-    Validates by forwarding the better-auth.session_token cookie (or an
-    Authorization: Bearer token) to Neon Auth's GET /get-session.
+    Validates the JWT from the Authorization: Bearer <token> header by verifying
+    the signature against Neon Auth's JWKS endpoint — no proxying of requests.
     """
     if not AUTH_ENABLED:
         return _LOCAL_DEV_USER
 
-    token = request.cookies.get(SESSION_COOKIE)
-    # Also accept Authorization: Bearer <token> for programmatic API clients
     auth_header = request.headers.get("authorization", "")
-    bearer = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
-
-    if not token and not bearer:
+    if not auth_header.lower().startswith("bearer "):
         return None
 
-    headers: dict[str, str] = {}
-    if token:
-        headers["cookie"] = f"{SESSION_COOKIE}={token}"
-    if bearer:
-        headers["authorization"] = f"Bearer {bearer}"
+    token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        return None
 
-    async with httpx.AsyncClient() as client:
-        try:
-            r = await client.get(
-                f"{NEON_AUTH_BASE_URL}/get-session",
-                headers=headers,
-                timeout=5.0,
-            )
-            if r.status_code == 200:
-                data = r.json()
-                user = data.get("user")
-                if user:
-                    return {
-                        "id": user.get("id"),
-                        "primary_email": user.get("email"),
-                        "display_name": user.get("name"),
-                    }
-        except httpx.RequestError:
-            pass
-    return None
+    try:
+        import jwt  # type: ignore
+
+        jwks_client = _get_jwks_client()
+        signing_key = jwks_client.get_signing_key_from_jwt(token).key
+        payload = jwt.decode(
+            token,
+            signing_key,
+            algorithms=["ES256", "RS256"],
+            issuer=NEON_AUTH_BASE_URL,
+        )
+        return {
+            "id": payload.get("sub"),
+            "email": payload.get("email"),
+            "name": payload.get("name"),
+        }
+    except Exception:
+        return None
 
 
 async def require_auth(request: Request) -> dict:
+    """FastAPI dependency: validates JWT and returns user dict, or raises 401."""
     user = await validate_session(request)
     if not user:
         raise HTTPException(
             status_code=401,
-            detail={"error": "Authentication required", "login_url": "/login"},
+            detail={"error": "Authentication required"},
         )
     return user
-
-
-async def _email_auth(request: Request, endpoint: str, payload: dict) -> RedirectResponse:
-    """POST to a Better Auth email endpoint and set the session cookie on success."""
-    async with httpx.AsyncClient() as client:
-        try:
-            r = await client.post(
-                f"{NEON_AUTH_BASE_URL}/{endpoint}",
-                json=payload,
-                headers={"content-type": "application/json"},
-                timeout=10.0,
-            )
-        except httpx.RequestError:
-            return RedirectResponse("/login?error=network_error", status_code=302)
-
-    if r.status_code in (200, 201):
-        data = r.json()
-        token = data.get("token")
-        if token:
-            is_secure = _base_url(request).startswith("https://")
-            response = RedirectResponse("/", status_code=302)
-            response.set_cookie(
-                SESSION_COOKIE,
-                token,
-                max_age=COOKIE_MAX_AGE,
-                httponly=True,
-                secure=is_secure,
-                samesite="lax",
-            )
-            return response
-
-    try:
-        error_msg = r.json().get("message", "auth_failed").replace(" ", "_").lower()
-    except Exception:
-        error_msg = "auth_failed"
-    return RedirectResponse(f"/login?error={error_msg}", status_code=302)
-
-
-async def start_email_signin(request: Request, email: str, password: str) -> RedirectResponse:
-    """Sign in with email and password via Better Auth."""
-    return await _email_auth(
-        request,
-        "sign-in/email",
-        {"email": email, "password": password, "rememberMe": True},
-    )
-
-
-async def start_email_signup(request: Request, email: str, password: str, name: str) -> RedirectResponse:
-    """Create an account and sign in via Better Auth."""
-    return await _email_auth(
-        request,
-        "sign-up/email",
-        {"email": email, "password": password, "name": name or email.split("@")[0]},
-    )
-
-
-async def signout_response(request: Request) -> RedirectResponse:
-    """Invalidate the Neon Auth session and clear the local session cookie."""
-    token = request.cookies.get(SESSION_COOKIE)
-    if token:
-        async with httpx.AsyncClient() as client:
-            try:
-                await client.post(
-                    f"{NEON_AUTH_BASE_URL}/sign-out",
-                    headers={"cookie": f"{SESSION_COOKIE}={token}"},
-                    timeout=5.0,
-                )
-            except httpx.RequestError:
-                pass
-
-    is_secure = _base_url(request).startswith("https://")
-    response = RedirectResponse("/login", status_code=302)
-    response.delete_cookie(SESSION_COOKIE, secure=is_secure, httponly=True, samesite="lax")
-    return response
