@@ -1,244 +1,95 @@
-# CLAUDE.md — Wallet-Scanner
+# Wallet-Scanner / predictionscanner.io
+
+Research tool for analyzing Polymarket wallets. Identifies skilled traders by combining Polymarket's authoritative leaderboard with per-position data from `/positions` and qualitative AI analysis. Hosted at predictionscanner.io.
+
+## Stack
+
+- Python 3.11+, FastAPI on Vercel serverless
+- React + Vite + TypeScript frontend (in `dashboard/` — built to static assets, served by FastAPI)
+- Postgres via Neon (`DATABASE_URL`), Launch tier for storage headroom
+- Neon Auth (Better Auth) for authentication — JWT-based
+- Anthropic Claude for qualitative analysis (model: `claude-sonnet-4-5-20250929` or current best Sonnet)
+- Voyage AI for embeddings if/when RAG features are added (`voyage-3`)
+- GitHub Actions for scheduled scans (Mondays 06:00 UTC, 5h timeout, `--incremental`)
+
+## Architecture
+
+**Frontend (React + Vite SPA)**
+- Lives in `dashboard/`, builds to `dashboard/dist/`, served as static by FastAPI
+- Talks to Neon Auth directly via `@neondatabase/auth` (or `@neondatabase/neon-js`)
+- After authentication, attaches the JWT as a Bearer token on all calls to our API
+- Routes: `/login`, `/` (leaderboard), `/wallet/:address`, `/watchlist`
+
+**Backend (FastAPI on Vercel)**
+- API routes under `/api/*` — leaderboard, watchlist CRUD, strategy analysis, regeneration, health
+- Validates JWTs via PyJWT against Neon Auth's JWKS endpoint
+- No `/api/auth/*` proxy routes — the frontend talks to Neon Auth directly
+- DB access via SQLModel + psycopg2-binary
+
+**Scanner (Python CLI)**
+- `python main.py scan` — discovers wallets via `/v1/leaderboard`, fetches `/positions`, computes metrics
+- `python main.py analyze-strategies --top N` — runs Claude qualitative analysis on top N wallets
+- Scheduled via GitHub Actions, writes directly to Neon (no API in between)
+- Source of truth: `/v1/leaderboard` for P&L/volume; `/positions` for per-position resolution data
+- `/activity` is NOT used — it's a transaction log without resolution data and proved insufficient
+
+## Workflow
+
+- Architecture and planning happen in Claude web chat
+- Implementation via Claude Code on GitHub issues → PR → review → merge → Vercel auto-deploys
+- Local dev in Codespaces or laptop with `.env` (gitignored) holding `DATABASE_URL`, `ANTHROPIC_API_KEY`, optionally `NEON_AUTH_BASE_URL` for testing
+- The `.env.example` file documents required env vars; keep it current
+
+## Build pipeline
+
+- Backend: `pip install -r requirements.txt`; FastAPI runs as Vercel serverless function via `api/index.py`
+- Frontend: `cd dashboard && npm install && npm run build` → produces `dashboard/dist/`
+- `vercel.json` configures the Vercel build to install Python deps AND build the Vite app, then deploy `api/` as serverless and `dashboard/dist/` as static
+- FastAPI serves `dashboard/dist/index.html` for `/` and any non-`/api/*` route (SPA fallback), with assets at `/assets/*`
+
+## Database conventions
+
+- All sessions use `expire_on_commit=False` (avoid detached-instance errors during batch upserts)
+- Numpy values are coerced to native Python types before persistence — wrap with `float()` or `int()`, or use a `_to_python_number()` helper
+- Position table is **append-mostly**: `first_seen_at`, `last_seen_at`, `is_active`. Don't delete; mark inactive when a position disappears from the API.
+- User-scoped data references `neon_auth.user.id` (string) as foreign key
+- `walletmetrics` schema is position-derived (no `win_count`/`win_rate`/`sharpe_ratio` — those required trade-level data we can't reliably get from `/activity`)
+
+## Auth conventions
+
+- Frontend handles all auth flows directly via the Neon Auth SDK
+- Backend never proxies auth requests
+- Backend validates the JWT on every protected endpoint via `Depends(get_current_user)`
+- `get_current_user()` is in `api/auth.py`; uses PyJWKClient against `{NEON_AUTH_BASE_URL}/.well-known/jwks.json`
+- `/api/health` is the only public endpoint; everything else is auth-protected
+
+## Tone and scope
+
+This is a real product. Build features that match what a working analyst would want. Don't preemptively constrain the design — if a feature warrants Postgres, frontend interactivity, multi-user state, third-party services, or new infrastructure, use them. Make architectural decisions based on what the product actually needs, not on a desire to keep the codebase artificially small.
 
 ## What this project is
 
-A personal Python research tool for discovering and tracking skilled wallets on Polymarket. Read-only. Single-user. The output is a Postgres database (Neon), a dashboard the owner views privately, and optional alerts.
+- A research tool for the owner. Hosted publicly because it's convenient, gated by auth so it isn't browsed by strangers.
+- A platform for testing whether public on-chain data on Polymarket reveals replicable strategies.
+- A long-running, scheduled-scan-driven dataset that grows in value over time.
 
-### Architectural decision (2026-04)
+## What this project is not
 
-`/activity` proved insufficient as the primary data source — it is a transaction log without resolution data. The scanner was refactored to use:
+- **A trading bot.** The scanner is read-only research. It never executes trades. No private keys.
+- **A signal service.** We don't sell or distribute alpha. The site is for the owner's research, possibly extended to a small number of trusted collaborators.
+- **Multi-tenant SaaS.** Users have their own watchlists, but there's no team/org model and no plan to add one.
 
-- **`/v1/leaderboard`**: Provides authoritative P&L and volume per wallet, already computed by Polymarket.
-- **`/positions`**: Provides per-position resolution data including `redeemable` (TRUE = market resolved), `cashPnl`, `realizedPnl`, and position sizing.
-- **`/value`**: Returns current portfolio USDC value.
+## Sensitive data
 
-The `trade` table was dropped. The `position` table replaces it. `WalletMetrics` now stores leaderboard-derived pnl/vol plus position-based metrics.
+- `ANTHROPIC_API_KEY` — `.env` (gitignored), GitHub repo secrets, Vercel env vars
+- `DATABASE_URL` — same locations
+- `NEON_AUTH_BASE_URL` — server-side only; the frontend uses `VITE_NEON_AUTH_URL` (set to the same value but with the `VITE_` prefix so Vite inlines it into the client bundle)
+- Never commit `.env`. Never log API keys or DB credentials.
+- `NEON_AUTH_COOKIE_SECRET` is **not used** — Better Auth cookies are signed by Neon's hosted service. Remove if present.
 
-Realistic universe: top 1,000–2,000 wallets that pass hard filters, of which 50–200 will be analytically interesting after red flag review.
+## Development tips
 
-The dashboard MAY be deployed to a personal hosting environment (Vercel, Railway, Fly, a personal VPS, etc.) so the owner can view it from any device, including mobile. This is personal infrastructure, not a public product.
-
-## What this project is NOT
-
-- **Not a trading bot.** No buy/sell execution layer. No wallet connections for write operations. No private keys are ever loaded, stored, or referenced.
-- **Not a multi-tenant SaaS.** No signup flow, no public users table, no per-user data isolation, no billing. The deployment, if any, serves exactly one person (the owner).
-- **Not an investment recommendation engine.** It surfaces information. Decisions are the owner's.
-
-If a task asks for any of the above, stop and ask the owner before proceeding.
-
-## Deployment guidance
-
-The owner runs this in three possible modes:
-
-- **Local CLI** — `python main.py scan` from the laptop. The default development workflow.
-- **Personal VPS daemon** — for the alerts poller running 24/7. Single VPS, owner-controlled.
-- **Personal hosted dashboard** — a small web view of the leaderboard and alerts, hosted on Vercel / Railway / Fly / equivalent.
-
-Access control on the hosted dashboard is the owner's call, not a project rule. Options range from "none — the URL is the secret" to HTTP basic auth to Cloudflare Access to Vercel's built-in protection. All are acceptable. The owner decides based on their threat model.
-
-The dashboard MUST display only — no trade execution, no key handling, no order placement. How access is gated, if at all, is owner discretion.
-
-If hosting on Vercel, the dashboard layer can be a thin FastAPI or Flask app, OR a small Next.js read-only frontend that calls a Python API — Claude should ask the owner which they prefer before adding a web layer.
-
-## Tech stack
-
-### Core (always)
-- **Python 3.11+** for scanner, analysis, watch, and any backend
-- **anthropic** SDK — model `claude-sonnet-4-20250514` for scanner qualitative review, `claude-opus-4-7` only for periodic deep analysis
-- **httpx** (async) for all HTTP — never `requests`
-- **tenacity** for retries with exponential backoff
-- **sqlmodel** + **sqlalchemy** for ORM; **psycopg[binary]** for Postgres driver
-- **pandas / numpy** for stats
-- **python-dotenv** for config
-- **pytest** + **pytest-asyncio** for tests
-
-### Local terminal dashboard
-- **rich + textual** — for the developer's local terminal view
-
-### Hosted dashboard (optional, if owner chooses to deploy)
-- **FastAPI** for a thin read-only API serving the SQLite data
-- **Next.js + Tailwind** if the owner wants a polished mobile-friendly web view, OR plain Jinja2 templates served from FastAPI for a simpler stack
-- Authentication is optional and is the owner's call
-
-Use Postgres (via `DATABASE_URL`) for hosted deployments (Vercel, GitHub Actions). SQLite remains the default for local CLI development. The libSQL/Turso path was abandoned due to driver compatibility issues with SQLAlchemy (`sqlite3.Connection has no create_function attribute`). Do not add Docker unless the owner asks. Do not add Redis or a job queue — async Python with `asyncio.create_task` is sufficient at this scale.
-
-## Folder structure (canonical)
-
-```
-Wallet-Scanner/
-├── main.py                    # CLI entry, click or argparse
-├── config.py                  # All config + .env loading
-├── requirements.txt
-├── .env.example
-├── README.md
-├── CLAUDE.md
-├── data/                      # SQLite DBs, gitignored except .gitkeep
-├── scanner/                   # Wallet discovery + metrics
-├── analysis/                  # Claude review + pattern extraction + red flags
-├── watch/                     # Polling + alerting
-├── dashboard/
-│   ├── terminal/              # rich/textual local TUI
-│   └── web/                   # OPTIONAL — hosted read-only dashboard (only if owner adds it)
-├── tests/                     # pytest suite, mirrors module structure
-└── vercel.json                # OPTIONAL — only if hosted dashboard is deployed
-```
-
-When adding new functionality, prefer extending an existing module over creating a new one. New top-level folders require justification.
-
-## Conventions
-
-### Python style
-- Type hints on every function signature
-- `from __future__ import annotations` at the top of every module
-- `dataclasses` or `pydantic` BaseModel for structured data, never bare dicts for domain objects
-- Async by default for I/O. Sync for pure CPU work (stats, ranking).
-- Format with `ruff format`. Lint with `ruff check`.
-
-### Imports
-- stdlib → third-party → local, separated by blank lines
-- Absolute imports inside the project, no relative
-- No wildcard imports
-
-### Error handling
-- Network calls use `tenacity` retry with backoff: 3 retries, exponential, max 30s
-- Catch specific exceptions, never bare `except:`
-- Log with context (which wallet, which market, what request)
-- The scanner must never crash on a single bad wallet. Skip + log + continue.
-
-### Database
-- All schema in `data/schema.py` using sqlmodel
-- Migrations: run `python scripts/drop_trade_table.py` when upgrading from the old trade-based schema (drops `trade` and `walletmetrics`, recreates `walletmetrics` with new fields)
-- Use transactions for multi-row writes
-- All DB writes go through `repository.py` modules — no inline SQL in business logic
-- Local development uses SQLite at `data/research.db` (no env var needed)
-- Hosted deployments use Neon Postgres — set `DATABASE_URL=postgresql://...` in env
-- If hosted dashboard needs DB access, it connects via the same `DATABASE_URL`; never duplicates state
-
-### Claude API usage
-- Always use the official `anthropic` SDK
-- Model strings as constants in `config.py`
-- Sonnet for high-volume scanning (~200 calls per leaderboard refresh)
-- Opus only for periodic deep analysis (weekly pattern report) — never for scanner
-- Always include `max_tokens` explicitly
-- Structured outputs: prompt for JSON, parse with pydantic, validate. Log raw on parse fail, skip — don't crash.
-
-### Cost discipline
-- Every Claude call must be justified
-- Scanner calls Claude only on top 200 wallets after numerical filtering — never on the full 10k+ pool
-- Estimated full-run cost: ~$2-4. If a change pushes that over $20, flag it in the PR description.
-
-### Logging
-- `logging` module, not `print`. Configured once in `config.py`.
-- Levels: DEBUG / INFO / WARNING / ERROR
-- Never log API keys
-
-### Testing
-- pytest with pytest-asyncio
-- One test file per module
-- Pure-function tests (stats, metrics, ranking) get full coverage
-- Network-dependent tests use vcrpy or saved fixtures, never live API calls in CI
-- Test suite must complete in under 30 seconds
-
-### Git + commits
-- Branch per feature, no direct commits to main
-- Conventional commit prefix: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`
-- One logical change per commit
-- PR description: what changed, why, how it was tested, cost implications
-
-## Hard rules
-
-1. **No trading execution layer.** Not now, not later. Push back if asked.
-2. **No private key handling.** The project never loads, stores, or transmits keys.
-3. **No public multi-tenancy.** Single-user only — no signup, no users table, no billing.
-4. **Access control on the deployed dashboard is owner discretion.** Not a project mandate. Implement what the owner asks for, nothing more, nothing less.
-5. **No fabricated metrics.** All metrics derive from real API data. Never estimate or impute values for positions with missing resolution data.
-6. **Never call Claude on the full wallet population.** Numerical filters first, Claude on top 200 only.
-7. **Never silently overwrite cached data.** Cache writes include timestamps; reads check freshness.
-8. **Polymarket Data API is rate-limited.** Default 2 req/sec. Faster requires explicit owner approval.
-
-## Reference docs
-
-- Polymarket Data API: https://docs.polymarket.com/developers/dev-resources/main
-- Polymarket CLOB API (read-only endpoints only): https://docs.polymarket.com/developers/CLOB/introduction
-- Anthropic SDK: https://docs.claude.com/en/api/overview
-- sqlmodel: https://sqlmodel.tiangolo.com/
-- textual: https://textual.textualize.io/
-- FastAPI: https://fastapi.tiangolo.com/
-
-## Auth (Neon Auth — JWT-validated, decoupled architecture)
-
-The hosted dashboard uses Neon Auth (powered by Better Auth) for sign-in. The architecture is **decoupled**: the frontend talks to Neon Auth directly; the backend validates JWTs locally via JWKS. There is no auth proxy through our FastAPI backend.
-
-**Do NOT recreate the old proxy pattern** (`/api/auth/*` routes that forwarded requests to Neon Auth). That pattern was removed because it required `python-multipart`, added latency on every request, and coupled availability to Neon Auth being reachable from the server. The previous architectural mistake was: `browser → our FastAPI → Neon Auth`. The correct pattern is: `browser → Neon Auth directly`, then `browser → our FastAPI with JWT`.
-
-### How it works
-
-1. User visits `/login` → frontend JavaScript fetches `/api/config` to get `NEON_AUTH_BASE_URL`.
-2. For email sign-in/sign-up: frontend calls `POST {NEON_AUTH_BASE_URL}/sign-in/email` or `/sign-up/email` **directly** → Neon Auth returns `{ token: "eyJ..." }` (a JWT).
-3. For Google OAuth: frontend calls `POST {NEON_AUTH_BASE_URL}/sign-in/social` → gets a Google redirect URL → browser navigates to Google → after OAuth, Neon Auth redirects back to `/login?oauth_callback=1` → frontend calls `GET {NEON_AUTH_BASE_URL}/get-session` with `credentials: 'include'` to retrieve the JWT.
-4. JWT is stored in `localStorage` as `auth_token`.
-5. Every API call from the frontend includes `Authorization: Bearer <jwt>`.
-6. FastAPI's `require_auth` dependency validates the JWT signature via Neon Auth's JWKS endpoint (`{NEON_AUTH_BASE_URL}/.well-known/jwks.json`) using `PyJWT` + `PyJWKClient`. No network call to Neon Auth per request — JWKS keys are cached.
-7. User identity (`sub` claim = user ID) is extracted from the validated JWT payload.
-
-### Required Vercel env vars
-
-| Variable | Where to find |
-|---|---|
-| `NEON_AUTH_BASE_URL` | Neon Console → Auth → Configuration → Auth URL |
-
-`NEON_AUTH_COOKIE_SECRET` is **not** needed — cookies are managed by Neon Auth's own domain; we use JWTs, not session cookies.
-
-### Local development
-
-Leave `NEON_AUTH_BASE_URL` unset. `AUTH_ENABLED` in `api/auth.py` will be `False`. `/api/config` returns `{ "neon_auth_url": "" }`, so the login page immediately redirects to `/`. Every API call is treated as the `local-dev` user — no OAuth flow is triggered.
-
-### OAuth providers currently enabled
-
-- **Email** — default
-- **Google** — via Neon Auth shared keys (default)
-- **GitHub** — NOT yet enabled. To add it: Neon Console → Auth → Configuration → OAuth providers.
-
-### Protected routes
-
-All `/api/*` routes except `/api/health` and `/api/config` require a valid JWT (`Depends(require_auth)`). The GitHub Actions scheduler writes directly to Postgres via `DATABASE_URL` — it never touches the API, so it is unaffected by auth.
-
-### User-scoped data
-
-User identity comes from the `sub` claim of the validated JWT (a stable UUID from Neon Auth per provider account). This is stored as `user_id` in the `user_watchlist` table.
-
-### Post-deploy checklist
-
-After deploying to Vercel:
-1. Add `NEON_AUTH_BASE_URL` to Vercel env vars.
-2. Add `predictionscanner.io` to trusted domains: Neon Console → Auth → Configuration → Domains.
-3. Redeploy and test email sign-in and Google sign-in flows.
-4. Verify: `/api/leaderboard` with no Bearer header → 401; with valid JWT → 200.
-
-## Scheduled scans
-
-Weekly scans run automatically via `.github/workflows/scheduled-scan.yml` (every Monday at
-06:00 UTC, plus on-demand via `workflow_dispatch`). The workflow runs:
-
-```bash
-python main.py scan --incremental
-```
-
-with `ANTHROPIC_API_KEY` and `DATABASE_URL` injected as GitHub secrets. Results are written
-directly to Neon Postgres via the standard SQLAlchemy engine in `data/database.py`.
-
-**Rules that must be preserved in any future scanner changes:**
-
-1. **`--incremental` flag must always be accepted by `python main.py scan`.**
-   - Skips wallets refreshed in the last 24 hours (controlled by `WALLET_CACHE_TTL`)
-   - Skips Claude qualitative review for wallets reviewed in the last 7 days
-   - Still re-ranks all wallets and writes the full leaderboard on every run
-   - On first run with an empty DB, falls back to full wallet discovery automatically
-
-2. **Cost discipline on the scheduled path.** The `--incremental` flag is what keeps the
-   scheduled run from calling Claude on the full top-200 list every week. If you change the
-   Claude review logic, ensure freshness skipping still works.
-
-## When in doubt
-
-Ask the owner. Scope discipline matters, but the owner decides what's in scope. When the owner makes a call that contradicts a previous instruction here, follow the owner — and update this file accordingly.
+- Always run a small `--max-wallets 50` or `--top 1` test before triggering a full scan or analysis
+- When debugging, prefer Vercel's runtime logs over guessing
+- Schema changes should be backwards-compatible; existing data should be preserved through migrations
+- Bumping the GitHub Actions timeout is fine when needed; 5 hours is a sensible ceiling
