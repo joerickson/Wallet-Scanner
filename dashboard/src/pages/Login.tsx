@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   getSession,
-  isAuthConfigured,
   signInEmail,
   signUpEmail,
   signInSocialRedirectUrl,
@@ -20,11 +19,6 @@ export default function Login() {
   const [googleLoading, setGoogleLoading] = useState(false);
 
   useEffect(() => {
-    if (!isAuthConfigured()) {
-      navigate('/', { replace: true });
-      return;
-    }
-
     const params = new URLSearchParams(location.search);
     if (params.get('oauth_callback')) {
       handleOAuthCallback().then((ok) => {
