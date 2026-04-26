@@ -10,11 +10,13 @@ from sqlmodel import Session, select
 from data.database import get_engine
 from data.schema import (
     Alert,
+    ClaudeUsageLog,
     Position,
     UserWatchlist,
     Wallet,
     WalletMetrics,
     WalletRanking,
+    WalletStrategyAnalysis,
     WatchedWallet,
 )
 
@@ -373,3 +375,76 @@ def get_recent_alerts(limit: int = 100) -> list[Alert]:
     with _session() as s:
         stmt = select(Alert).order_by(Alert.alerted_at.desc()).limit(limit)
         return list(s.exec(stmt).all())
+
+
+# ── Strategy analysis ─────────────────────────────────────────────────────────
+
+def save_strategy_analysis(analysis: WalletStrategyAnalysis) -> WalletStrategyAnalysis:
+    with _session() as s:
+        s.add(analysis)
+        s.commit()
+        s.refresh(analysis)
+        return analysis
+
+
+def get_latest_strategy_analysis(address: str) -> WalletStrategyAnalysis | None:
+    with _session() as s:
+        stmt = (
+            select(WalletStrategyAnalysis)
+            .where(WalletStrategyAnalysis.wallet_address == address)
+            .order_by(WalletStrategyAnalysis.generated_at.desc())
+            .limit(1)
+        )
+        return s.exec(stmt).first()
+
+
+def get_strategy_analysis_history(address: str) -> list[WalletStrategyAnalysis]:
+    with _session() as s:
+        stmt = (
+            select(WalletStrategyAnalysis)
+            .where(WalletStrategyAnalysis.wallet_address == address)
+            .order_by(WalletStrategyAnalysis.generated_at.desc())
+        )
+        return list(s.exec(stmt).all())
+
+
+def get_fresh_strategy_analysis(address: str, within_days: int = 7) -> WalletStrategyAnalysis | None:
+    """Return a recent analysis if one exists within the cache window, else None."""
+    cutoff = datetime.utcnow() - timedelta(days=within_days)
+    with _session() as s:
+        stmt = (
+            select(WalletStrategyAnalysis)
+            .where(
+                WalletStrategyAnalysis.wallet_address == address,
+                WalletStrategyAnalysis.generated_at >= cutoff,
+            )
+            .order_by(WalletStrategyAnalysis.generated_at.desc())
+            .limit(1)
+        )
+        return s.exec(stmt).first()
+
+
+# ── Claude usage log ──────────────────────────────────────────────────────────
+
+def log_claude_usage(log: ClaudeUsageLog) -> None:
+    with _session() as s:
+        s.add(log)
+        s.commit()
+
+
+def get_monthly_claude_usage() -> dict:
+    """Return aggregate Claude usage for the current calendar month."""
+    start_of_month = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    with _session() as s:
+        rows = s.exec(
+            select(ClaudeUsageLog).where(ClaudeUsageLog.logged_at >= start_of_month)
+        ).all()
+        total_calls = len(rows)
+        total_cost = sum(r.cost_usd for r in rows)
+        strategy_calls = sum(1 for r in rows if r.call_type == "strategy_analysis")
+        return {
+            "total_calls": total_calls,
+            "strategy_analysis_calls": strategy_calls,
+            "total_cost_usd": round(total_cost, 4),
+            "since": start_of_month.isoformat(),
+        }

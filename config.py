@@ -40,6 +40,19 @@ MIN_REALIZED_POSITIONS: int = int(os.getenv("MIN_REALIZED_POSITIONS", "10"))
 # Never call Claude on the full population — only on post-filter top N
 CLAUDE_REVIEW_TOP_N: int = int(os.getenv("CLAUDE_REVIEW_TOP_N", "200"))
 
+# ── Strategy analysis ─────────────────────────────────────────────────────────
+# Deep analysis runs on top N wallets only; Sonnet keeps cost within ~$10/month
+STRATEGY_ANALYSIS_TOP_N: int = int(os.getenv("STRATEGY_ANALYSIS_TOP_N", "10"))
+STRATEGY_ANALYSIS_CACHE_TTL_DAYS: int = int(os.getenv("STRATEGY_ANALYSIS_CACHE_TTL_DAYS", "7"))
+STRATEGY_ANALYSIS_MAX_POSITIONS: int = int(os.getenv("STRATEGY_ANALYSIS_MAX_POSITIONS", "50"))
+STRATEGY_ANALYSIS_MAX_TOKENS: int = 4096
+# Regenerate rate limit per user per day (most expensive endpoint)
+STRATEGY_REGEN_DAILY_LIMIT: int = int(os.getenv("STRATEGY_REGEN_DAILY_LIMIT", "5"))
+
+# ── Claude cost tracking (Sonnet 4 pricing, per 1M tokens) ───────────────────
+CLAUDE_INPUT_COST_PER_1M: float = float(os.getenv("CLAUDE_INPUT_COST_PER_1M", "3.0"))
+CLAUDE_OUTPUT_COST_PER_1M: float = float(os.getenv("CLAUDE_OUTPUT_COST_PER_1M", "15.0"))
+
 # ── Composite ranking weights ─────────────────────────────────────────────────
 RANKING_WEIGHTS: dict[str, float] = {
     "total_pnl": float(os.getenv("WEIGHT_TOTAL_PNL", "0.40")),

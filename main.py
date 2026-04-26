@@ -347,6 +347,67 @@ def alerts(interval: int) -> None:
     asyncio.run(run_poll_loop(interval=interval))
 
 
+# ── analyze-strategies ────────────────────────────────────────────────────────
+
+@cli.command("analyze-strategies")
+@click.option("--top", default=10, show_default=True, type=int, help="Analyze top N wallets by composite_score.")
+@click.option("--wallet", default=None, help="Analyze a specific wallet address (overrides --top).")
+@click.option("--force", is_flag=True, default=False, help="Re-analyze even if recent analysis exists.")
+def analyze_strategies(top: int, wallet: str | None, force: bool) -> None:
+    """Deep strategy analysis for top wallets — produces replicability specifications.
+
+    \b
+    Runs the expensive deep Claude pass (top 10 by default, weekly cadence).
+    Results are stored in wallet_strategy_analysis and NOT exposed on the leaderboard yet.
+    Cost: ~$0.50–1.00 per wallet.
+    """
+    from analysis.strategy_analyzer import analyze_wallet_strategy
+    from config import STRATEGY_ANALYSIS_CACHE_TTL_DAYS
+    from scanner import repository as repo
+
+    if wallet:
+        addresses = [wallet.lower()]
+        console.print(f"[bold]Analyzing specific wallet: {addresses[0]}[/bold]")
+    else:
+        rankings = repo.get_top_rankings(limit=top)
+        if not rankings:
+            console.print("[yellow]No rankings found. Run: python main.py scan[/yellow]")
+            return
+        addresses = [r.wallet_address for r in rankings]
+        console.print(f"[bold]Analyzing top {len(addresses)} wallets by composite score…[/bold]")
+
+    analyzed = 0
+    skipped = 0
+    failed = 0
+
+    for address in addresses:
+        if not force:
+            cached = repo.get_fresh_strategy_analysis(address, within_days=STRATEGY_ANALYSIS_CACHE_TTL_DAYS)
+            if cached:
+                console.print(f"  [dim]skip {address[:12]}… (analyzed {cached.generated_at.strftime('%Y-%m-%d')})[/dim]")
+                skipped += 1
+                continue
+
+        console.print(f"  Analyzing [cyan]{address[:12]}…[/cyan]")
+        result = asyncio.run(analyze_wallet_strategy(address))
+        if result is None:
+            console.print(f"  [red]Failed: {address[:12]}…[/red]")
+            failed += 1
+            continue
+
+        repo.save_strategy_analysis(result)
+        replicable = "[green]replicable[/green]" if result.is_replicable else "[yellow]not replicable[/yellow]"
+        console.print(
+            f"  [green]✓[/green] {address[:12]}… — {result.strategy_type} — {replicable} "
+            f"(conf={result.replicability_confidence:.2f})"
+        )
+        analyzed += 1
+
+    console.print(
+        f"\n[bold]Done.[/bold] analyzed={analyzed} skipped={skipped} failed={failed}"
+    )
+
+
 # ── dashboard ─────────────────────────────────────────────────────────────────
 
 @cli.command()
