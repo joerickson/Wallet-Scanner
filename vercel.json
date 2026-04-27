@@ -16,6 +16,9 @@
       }
     }
   ],
+  "crons": [
+    { "path": "/api/cron/advance-paper-tests", "schedule": "*/5 * * * *" }
+  ],
   "routes": [
     {
       "src": "/(.*)",

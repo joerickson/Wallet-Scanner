@@ -3,6 +3,7 @@ import { AuthGuard } from './components/AuthGuard';
 import Login from './pages/Login';
 import Leaderboard from './pages/Leaderboard';
 import Watchlist from './pages/Watchlist';
+import PaperTests from './pages/PaperTests';
 
 export default function App() {
   return (
@@ -22,6 +23,14 @@ export default function App() {
           element={
             <AuthGuard>
               <Watchlist />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/paper-tests"
+          element={
+            <AuthGuard>
+              <PaperTests />
             </AuthGuard>
           }
         />
