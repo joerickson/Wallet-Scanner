@@ -43,6 +43,11 @@ export function isAuthConfigured(): boolean {
 export function signOut(): void {
   localStorage.removeItem('auth_token');
   localStorage.removeItem('auth_user');
+  // Invalidate the server-side session cookie so re-login gets a fresh JWT,
+  // not the stale one tied to the old session.
+  if (NEON_AUTH_URL) {
+    fetch(`${NEON_AUTH_URL}/sign-out`, { method: 'POST', credentials: 'include' }).catch(() => {});
+  }
 }
 
 export async function signInEmail(email: string, password: string): Promise<void> {
