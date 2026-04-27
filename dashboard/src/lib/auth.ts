@@ -54,11 +54,12 @@ export async function signInEmail(email: string, password: string): Promise<void
   });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new Error(String(data['message'] || 'Authentication failed'));
-  const token = data['token'] as string | undefined;
-  if (!token) throw new Error('No token returned from authentication service');
-  localStorage.setItem('auth_token', token);
   const user = data['user'] as Record<string, unknown> | undefined;
   if (user) persistUser(user);
+  const sessionRes = await fetch(`${NEON_AUTH_URL}/get-session`, { credentials: 'include' });
+  const jwt = sessionRes.headers.get('set-auth-jwt');
+  if (!jwt) throw new Error('No JWT returned from authentication service');
+  localStorage.setItem('auth_token', jwt);
 }
 
 export async function signUpEmail(email: string, password: string, name: string): Promise<void> {
@@ -70,11 +71,12 @@ export async function signUpEmail(email: string, password: string, name: string)
   });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new Error(String(data['message'] || 'Sign-up failed'));
-  const token = data['token'] as string | undefined;
-  if (!token) throw new Error('No token returned from authentication service');
-  localStorage.setItem('auth_token', token);
   const user = data['user'] as Record<string, unknown> | undefined;
   if (user) persistUser(user);
+  const sessionRes = await fetch(`${NEON_AUTH_URL}/get-session`, { credentials: 'include' });
+  const jwt = sessionRes.headers.get('set-auth-jwt');
+  if (!jwt) throw new Error('No JWT returned from authentication service');
+  localStorage.setItem('auth_token', jwt);
 }
 
 export async function signInSocialRedirectUrl(
@@ -98,11 +100,11 @@ export async function handleOAuthCallback(): Promise<boolean> {
   try {
     const res = await fetch(`${NEON_AUTH_URL}/get-session`, { credentials: 'include' });
     if (res.ok) {
-      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      const session = data['session'] as Record<string, unknown> | undefined;
-      const token = ((session && session['token']) || data['token']) as string | undefined;
-      if (token) {
-        localStorage.setItem('auth_token', token);
+      const jwt = res.headers.get('set-auth-jwt');
+      if (jwt) {
+        localStorage.setItem('auth_token', jwt);
+        const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        const session = data['session'] as Record<string, unknown> | undefined;
         const user = (data['user'] || (session && session['user'])) as
           | Record<string, unknown>
           | undefined;

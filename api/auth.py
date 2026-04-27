@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
-import time
 from typing import Optional
 
-import httpx
+import jwt
+from jwt import PyJWKClient, PyJWKClientError
 from fastapi import HTTPException, Request
 
 logger = logging.getLogger(__name__)
@@ -16,22 +15,17 @@ AUTH_ENABLED = bool(NEON_AUTH_BASE_URL)
 
 _LOCAL_DEV_USER = {"id": "local-dev", "email": "local@dev", "name": "Local Dev", "role": "user"}
 
-# In-memory session cache: SHA256(token) -> (user_dict, expiry_timestamp)
-_session_cache: dict[str, tuple[dict, float]] = {}
-_CACHE_TTL = 60.0
-_logged_response_shape = False
+_jwks_client: Optional[PyJWKClient] = None
+
+
+def _get_jwks_client() -> PyJWKClient:
+    global _jwks_client
+    if _jwks_client is None:
+        _jwks_client = PyJWKClient(f"{NEON_AUTH_BASE_URL}/.well-known/jwks.json")
+    return _jwks_client
 
 
 async def validate_session(request: Request) -> Optional[dict]:
-    """Return user dict if session token is valid, else None.
-
-    In local dev (AUTH_ENABLED=False), always returns the local-dev sentinel so
-    the app is usable without Neon Auth configured.
-
-    Validates the opaque session token from the Authorization: Bearer <token> header
-    by proxying to Neon Auth's /get-session endpoint. Results are cached for 60 s
-    (keyed by SHA256 of the token) to avoid hammering Neon on every request.
-    """
     if not AUTH_ENABLED:
         return _LOCAL_DEV_USER
 
@@ -43,61 +37,26 @@ async def validate_session(request: Request) -> Optional[dict]:
     if not token:
         return None
 
-    cache_key = hashlib.sha256(token.encode()).hexdigest()
-    now = time.time()
-    cached = _session_cache.get(cache_key)
-    if cached is not None:
-        user_dict, expiry = cached
-        if now < expiry:
-            return user_dict
-        del _session_cache[cache_key]
-
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(
-                f"{NEON_AUTH_BASE_URL}/get-session",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-    except Exception:
-        return None
-
-    if response.status_code != 200:
-        raise HTTPException(status_code=401, detail={"error": "Authentication required"})
-
-    global _logged_response_shape
-    if not _logged_response_shape:
-        # Log status and top-level keys once to confirm response shape without leaking token values.
-        try:
-            body_summary = list(response.json().keys()) if response.content else None
-        except Exception:
-            body_summary = "<unparseable>"
-        logger.info(
-            "Neon /get-session first response: status=%s body_keys=%s",
-            response.status_code,
-            body_summary,
+        client = _get_jwks_client()
+        signing_key = client.get_signing_key_from_jwt(token)
+        payload = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["ES256", "RS256", "HS256"],
         )
-        _logged_response_shape = True
-
-    parsed = response.json() if response.content else None
-    if parsed is None:
+    except Exception:
         raise HTTPException(status_code=401, detail={"error": "Authentication required"})
 
-    user_data = parsed.get("user") or (parsed.get("session") or {}).get("user")
-    if not user_data:
-        raise HTTPException(status_code=401, detail={"error": "Authentication required"})
-
-    user = {
-        "id": user_data.get("id"),
-        "email": user_data.get("email"),
-        "name": user_data.get("name"),
-        "role": user_data.get("role", "user"),
+    return {
+        "id": payload.get("sub"),
+        "email": payload.get("email"),
+        "role": payload.get("role", "user"),
     }
-    _session_cache[cache_key] = (user, now + _CACHE_TTL)
-    return user
 
 
 async def require_auth(request: Request) -> dict:
-    """FastAPI dependency: validates session token and returns user dict, or raises 401."""
+    """FastAPI dependency: validates JWT and returns user dict, or raises 401."""
     user = await validate_session(request)
     if not user:
         raise HTTPException(
