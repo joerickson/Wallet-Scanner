@@ -9,6 +9,13 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(path, { ...options, headers });
   if (!res.ok) {
+    if (res.status === 401) {
+      const { signOut } = await import('./auth');
+      signOut();
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
     const text = await res.text().catch(() => '');
     const err = new Error(`API ${res.status}: ${text}`) as Error & { status: number };
     err.status = res.status;
