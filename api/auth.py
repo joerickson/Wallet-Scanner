@@ -44,6 +44,7 @@ async def validate_session(request: Request) -> Optional[dict]:
             token,
             signing_key.key,
             algorithms=["EdDSA", "ES256", "RS256", "HS256"],
+            options={"verify_aud": False},
         )
     except Exception as exc:
         logger.warning("%s: %s", type(exc).__name__, exc)
