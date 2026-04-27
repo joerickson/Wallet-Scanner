@@ -31,14 +31,11 @@ export default function Watchlist() {
         setLoading(false);
       })
       .catch((err) => {
-        if (err && (err as { status?: number }).status === 401) {
-          navigate('/login', { replace: true });
-          return;
-        }
+        if ((err as { status?: number })?.status === 401) return; // apiFetch handles redirect
         setError('Failed to load watchlist.');
         setLoading(false);
       });
-  }, [navigate]);
+  }, []);
 
   function handleRemove(addr: string) {
     apiFetch(`/api/watchlist/${addr}`, { method: 'DELETE' })

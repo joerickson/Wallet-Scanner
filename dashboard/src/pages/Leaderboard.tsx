@@ -459,14 +459,11 @@ export default function Leaderboard() {
         setDataLoading(false);
       })
       .catch((err) => {
-        if (err && (err as { status?: number }).status === 401) {
-          navigate('/login', { replace: true });
-          return;
-        }
+        if ((err as { status?: number })?.status === 401) return; // apiFetch handles redirect
         setDataError('Failed to load leaderboard. Please refresh.');
         setDataLoading(false);
       });
-  }, [navigate]);
+  }, []);
 
   // ── Strategy fetching ─────────────────────────────────────────────────────
 
