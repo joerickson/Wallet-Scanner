@@ -43,9 +43,10 @@ async def validate_session(request: Request) -> Optional[dict]:
         payload = jwt.decode(
             token,
             signing_key.key,
-            algorithms=["ES256", "RS256", "HS256"],
+            algorithms=["EdDSA", "ES256", "RS256", "HS256"],
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("%s: %s", type(exc).__name__, exc)
         raise HTTPException(status_code=401, detail={"error": "Authentication required"})
 
     return {
