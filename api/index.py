@@ -363,6 +363,18 @@ async def wallet_detail(address: str, user: dict = Depends(require_auth)) -> dic
     }
 
 
+# ── Polymarket endpoints ──────────────────────────────────────────────────────
+
+
+@app.get("/api/polymarket/test")
+async def polymarket_test(sport: str, user: dict = Depends(require_auth)) -> list[dict]:
+    """Return the first 5 open markets for a given sport. Used to manually verify the client."""
+    from api.polymarket import search_markets
+
+    markets = await search_markets({"sports": [sport], "leagues": [], "status": "open"})
+    return [m.model_dump(mode="json") for m in markets[:5]]
+
+
 # ── Static assets and SPA fallback ───────────────────────────────────────────
 # Mount /assets only when the dist directory has been built.
 # All non-API GET requests fall through to the React SPA's index.html.
