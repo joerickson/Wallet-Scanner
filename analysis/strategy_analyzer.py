@@ -19,7 +19,7 @@ from scanner import repository as repo
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 _VALID_STRATEGY_TYPES = frozenset({
     "arbitrage", "model_driven", "discretionary", "momentum",
@@ -120,7 +120,27 @@ def _build_strategy_prompt(
         ' "failure_modes": ["string", ...],',
         ' "risk_factors": ["string", ...],',
         ' "full_thesis": "200-500 word complete reasoning",',
-        ' "paper_trade_recommendation": "Over the next 7 days, take positions matching <criteria>..."}',
+        ' "paper_trade_recommendation": "Over the next 7 days, take positions matching <criteria>...",',
+        ' "paper_test_filter": {',
+        '   "sports": [<"basketball"|"tennis"|"soccer"|"baseball"|"hockey"|"football"> or null if sport cannot be inferred],',
+        '   "leagues": [<string> e.g. "NBA", "EPL" — empty array means any league],',
+        '   "market_types": [<"binary"|"multi-outcome">],',
+        '   "status": "open" or "any",',
+        '   "hours_until_resolution_min": <number or null>,',
+        '   "hours_until_resolution_max": <number or null>,',
+        '   "min_volume_usd": <number or null>,',
+        '   "min_liquidity_usd": <number or null>,',
+        '   "entry_conditions": [{"type": <"combined_cost_below"|"single_side_discount_below"|"spread_above"|"custom">, "value": <number or null>, "description": <string>}],',
+        '   "exit_conditions": [{"type": <"price_move_pct_in_favor"|"hedge_ratio_suboptimal"|"resolution"|"time_in_position_hours"|"custom">, "value": <number or null>, "description": <string>}],',
+        '   "position_sizing": {"type": <"pct_of_capital"|"fixed_usd">, "value_min": <number>, "value_max": <number>},',
+        '   "duration_days": <number — typically 7>',
+        ' }',
+        '}',
+        "",
+        "RULES FOR paper_test_filter: Base every field on the same reasoning as paper_trade_recommendation.",
+        "If the prose says 'monitor NBA and tennis markets opening within 2-6 hours', then",
+        "sports=[\"basketball\",\"tennis\"], leagues=[\"NBA\"], hours_until_resolution_min=2, hours_until_resolution_max=6.",
+        "If a value cannot be directly inferred from the analysis, set it to null. Do not invent values.",
         "",
         "RULES FOR entry_signal and exit_signal: Be concrete.",
         "'Sentiment is positive' is WRONG.",
@@ -172,6 +192,9 @@ def _parse_strategy_response(raw: str, address: str) -> dict | None:
         data["failure_modes"] = []
     if not isinstance(data.get("risk_factors"), list):
         data["risk_factors"] = []
+
+    if not isinstance(data.get("paper_test_filter"), dict):
+        data["paper_test_filter"] = None
 
     return data
 
@@ -277,4 +300,5 @@ async def analyze_wallet_strategy(
         wallet_state_snapshot=json.dumps(metrics_snapshot),
         full_thesis=str(data["full_thesis"]),
         paper_trade_recommendation=str(data["paper_trade_recommendation"]),
+        paper_test_filter=json.dumps(data["paper_test_filter"]) if data.get("paper_test_filter") is not None else None,
     )

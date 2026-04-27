@@ -233,6 +233,7 @@ def _serialize_strategy(s) -> dict:
         "wallet_state_snapshot": _json_dict(s.wallet_state_snapshot),
         "full_thesis": s.full_thesis,
         "paper_trade_recommendation": s.paper_trade_recommendation,
+        "paper_test_filter": _json_dict(s.paper_test_filter) if s.paper_test_filter else None,
     }
 
 

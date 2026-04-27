@@ -177,6 +177,9 @@ class WalletStrategyAnalysis(SQLModel, table=True):
     full_thesis: str
     paper_trade_recommendation: str
 
+    # Structured machine-readable filter derived from paper_trade_recommendation (JSON-encoded)
+    paper_test_filter: Optional[str] = Field(default=None)
+
     __table_args__ = (Index("ix_strategy_wallet_generated", "wallet_address", "generated_at"),)
 
 
