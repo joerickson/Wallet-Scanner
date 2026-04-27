@@ -15,7 +15,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     if (res.status === 401 && !redirectingToLogin) {
       redirectingToLogin = true;
       const { signOut } = await import('./auth');
-      signOut();
+      await signOut();
       window.location.href = '/login';
     }
     const text = await res.text().catch(() => '');

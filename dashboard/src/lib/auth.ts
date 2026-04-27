@@ -40,17 +40,20 @@ export function isAuthConfigured(): boolean {
   return Boolean(NEON_AUTH_URL);
 }
 
-export function signOut(): void {
+export async function signOut(): Promise<void> {
   localStorage.removeItem('auth_token');
   localStorage.removeItem('auth_user');
-  // Invalidate the server-side session cookie so re-login gets a fresh JWT,
-  // not the stale one tied to the old session.
+  // Await the server-side sign-out so the session cookie is invalidated before
+  // any subsequent sign-in attempt, preventing ExpiredSignatureError on re-login.
   if (NEON_AUTH_URL) {
-    fetch(`${NEON_AUTH_URL}/sign-out`, { method: 'POST', credentials: 'include' }).catch(() => {});
+    await fetch(`${NEON_AUTH_URL}/sign-out`, { method: 'POST', credentials: 'include' }).catch(() => {});
   }
 }
 
 export async function signInEmail(email: string, password: string): Promise<void> {
+  // Clear any stale server-side session before signing in so the auth server
+  // doesn't see an expired cookie and throw ExpiredSignatureError.
+  await signOut();
   const res = await fetch(`${NEON_AUTH_URL}/sign-in/email`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -68,6 +71,7 @@ export async function signInEmail(email: string, password: string): Promise<void
 }
 
 export async function signUpEmail(email: string, password: string, name: string): Promise<void> {
+  await signOut();
   const res = await fetch(`${NEON_AUTH_URL}/sign-up/email`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
