@@ -51,21 +51,50 @@ export async function signOut(): Promise<void> {
 }
 
 export async function signInEmail(email: string, password: string): Promise<void> {
-  // Clear any stale server-side session before signing in so the auth server
-  // doesn't see an expired cookie and throw ExpiredSignatureError.
   await signOut();
-  const res = await fetch(`${NEON_AUTH_URL}/sign-in/email`, {
+
+  let res = await fetch(`${NEON_AUTH_URL}/sign-in/email`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
     body: JSON.stringify({ email, password, rememberMe: true }),
   });
+
+  // If the Neon server rejects our request because the expired session cookie
+  // wasn't cleared by /sign-out (the server validates the cookie even on sign-out),
+  // retry without credentials so the stale cookie isn't sent.
+  let sentCredentials = true;
+  if (!res.ok) {
+    const errData = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (/expired|ExpiredSignature/i.test(String(errData['message'] || ''))) {
+      sentCredentials = false;
+      res = await fetch(`${NEON_AUTH_URL}/sign-in/email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'omit',
+        body: JSON.stringify({ email, password, rememberMe: true }),
+      });
+    }
+  }
+
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new Error(String(data['message'] || 'Authentication failed'));
   const user = data['user'] as Record<string, unknown> | undefined;
   if (user) persistUser(user);
-  const sessionRes = await fetch(`${NEON_AUTH_URL}/get-session`, { credentials: 'include' });
-  const jwt = sessionRes.headers.get('set-auth-jwt');
+
+  // Prefer the JWT from the sign-in response itself — avoids a /get-session
+  // round-trip that could also trip over a stale cookie.
+  const session = data['session'] as Record<string, unknown> | undefined;
+  const jwtFromBody = (
+    (session?.['access_token'] ?? data['access_token'] ?? data['token']) as string | undefined
+  );
+  let jwt: string | null = res.headers.get('set-auth-jwt') ?? jwtFromBody ?? null;
+
+  if (!jwt && sentCredentials) {
+    const sessionRes = await fetch(`${NEON_AUTH_URL}/get-session`, { credentials: 'include' });
+    jwt = sessionRes.headers.get('set-auth-jwt');
+  }
+
   if (!jwt) throw new Error('No JWT returned from authentication service');
   localStorage.setItem('auth_token', jwt);
 }
@@ -82,8 +111,19 @@ export async function signUpEmail(email: string, password: string, name: string)
   if (!res.ok) throw new Error(String(data['message'] || 'Sign-up failed'));
   const user = data['user'] as Record<string, unknown> | undefined;
   if (user) persistUser(user);
-  const sessionRes = await fetch(`${NEON_AUTH_URL}/get-session`, { credentials: 'include' });
-  const jwt = sessionRes.headers.get('set-auth-jwt');
+
+  // Prefer the JWT from the sign-up response itself.
+  const session = data['session'] as Record<string, unknown> | undefined;
+  const jwtFromBody = (
+    (session?.['access_token'] ?? data['access_token'] ?? data['token']) as string | undefined
+  );
+  let jwt: string | null = res.headers.get('set-auth-jwt') ?? jwtFromBody ?? null;
+
+  if (!jwt) {
+    const sessionRes = await fetch(`${NEON_AUTH_URL}/get-session`, { credentials: 'include' });
+    jwt = sessionRes.headers.get('set-auth-jwt');
+  }
+
   if (!jwt) throw new Error('No JWT returned from authentication service');
   localStorage.setItem('auth_token', jwt);
 }

@@ -938,9 +938,9 @@ export default function Leaderboard() {
 
   // ── Sign out ──────────────────────────────────────────────────────────────
 
-  function handleSignOut(e: React.MouseEvent) {
+  async function handleSignOut(e: React.MouseEvent) {
     e.preventDefault();
-    signOut();
+    await signOut();
     navigate('/login', { replace: true });
   }
 
