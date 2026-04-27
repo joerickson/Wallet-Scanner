@@ -61,6 +61,42 @@ export interface StrategyAnalysis {
   wallet_state_snapshot?: Record<string, unknown>;
   full_thesis?: string;
   paper_trade_recommendation?: string;
+  paper_test_filter?: Record<string, unknown> | null;
+}
+
+export interface PaperTrade {
+  id: string;
+  paper_test_id: string;
+  polymarket_condition_id: string;
+  market_question: string;
+  outcome_name: string;
+  token_id: string;
+  side: string;
+  entry_price: number;
+  entry_size_usd: number;
+  entry_at: string;
+  exit_price?: number | null;
+  exit_at?: string | null;
+  exit_reason?: string | null;
+  realized_pnl?: number | null;
+  status: string;
+}
+
+export interface PaperTest {
+  id: string;
+  wallet_address: string;
+  strategy_analysis_id: number;
+  user_id: string;
+  capital_allocated: number;
+  started_at: string;
+  ends_at: string;
+  status: string;
+  realized_pnl: number;
+  unrealized_pnl: number;
+  last_evaluated_at?: string | null;
+  filter_snapshot?: Record<string, unknown>;
+  created_at: string;
+  trades?: PaperTrade[];
 }
 
 export interface WatchlistEntry {

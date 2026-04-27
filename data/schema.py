@@ -196,3 +196,45 @@ class ClaudeUsageLog(SQLModel, table=True):
     output_tokens: int
     cost_usd: float
     logged_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PaperTest(SQLModel, table=True):
+    """A paper trading session that simulates a wallet strategy against live Polymarket data."""
+
+    __tablename__ = "paper_tests"
+
+    id: str = Field(primary_key=True)
+    wallet_address: str = Field(index=True)
+    strategy_analysis_id: int = Field(index=True)
+    user_id: str = Field(index=True)
+    capital_allocated: float = Field(default=10000.0)
+    started_at: datetime = Field(default_factory=datetime.utcnow)
+    ends_at: datetime
+    status: str = Field(default="running")  # running | completed | failed
+    realized_pnl: float = Field(default=0.0)
+    unrealized_pnl: float = Field(default=0.0)
+    last_evaluated_at: Optional[datetime] = Field(default=None)
+    filter_snapshot: str = Field(default="{}")  # JSON-encoded dict
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PaperTrade(SQLModel, table=True):
+    """An individual simulated trade within a paper test session."""
+
+    __tablename__ = "paper_trades"
+
+    id: str = Field(primary_key=True)
+    paper_test_id: str = Field(foreign_key="paper_tests.id", index=True)
+    polymarket_condition_id: str
+    market_question: str
+    outcome_name: str
+    token_id: str
+    side: str  # 'buy' or 'sell'
+    entry_price: float
+    entry_size_usd: float
+    entry_at: datetime = Field(default_factory=datetime.utcnow)
+    exit_price: Optional[float] = Field(default=None)
+    exit_at: Optional[datetime] = Field(default=None)
+    exit_reason: Optional[str] = Field(default=None)  # resolution | price_move | time | manual
+    realized_pnl: Optional[float] = Field(default=None)
+    status: str = Field(default="open")  # open | closed

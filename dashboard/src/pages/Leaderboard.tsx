@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
 import { getSession, signOut } from '../lib/auth';
-import type { Wallet, LeaderboardData, StrategyAnalysis, RegenState } from '../types';
+import type { Wallet, LeaderboardData, StrategyAnalysis, RegenState, PaperTest, PaperTrade } from '../types';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -139,6 +139,165 @@ function DeepSkeleton() {
   );
 }
 
+// ── PaperTestPanel ────────────────────────────────────────────────────────────
+
+function fmtTimeRemaining(endsAt: string): string {
+  const ms = new Date(endsAt).getTime() - Date.now();
+  if (ms <= 0) return 'Ended';
+  const hours = Math.floor(ms / 3600000);
+  const days = Math.floor(hours / 24);
+  if (days > 0) return `${days}d ${hours % 24}h remaining`;
+  const mins = Math.floor((ms % 3600000) / 60000);
+  return hours > 0 ? `${hours}h ${mins}m remaining` : `${mins}m remaining`;
+}
+
+function fmtPnlSign(v: number): string {
+  const abs = Math.abs(v);
+  const sign = v < 0 ? '-' : '+';
+  return sign + '$' + (abs >= 1000 ? Math.round(abs).toLocaleString('en-US') : abs.toFixed(2));
+}
+
+interface PaperTestPanelProps {
+  paperTestId: string;
+  onClose: () => void;
+}
+
+function PaperTestPanel({ paperTestId, onClose }: PaperTestPanelProps) {
+  const [test, setTest] = useState<PaperTest | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchTest = useCallback(() => {
+    apiFetch<PaperTest>(`/api/paper-tests/${paperTestId}`)
+      .then((data) => {
+        setTest(data);
+        setLoading(false);
+        if (data.status !== 'running' && pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      })
+      .catch((err) => {
+        setError((err as Error).message || 'Failed to load paper test');
+        setLoading(false);
+      });
+  }, [paperTestId]);
+
+  useEffect(() => {
+    fetchTest();
+    pollRef.current = setInterval(fetchTest, 30000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [fetchTest]);
+
+  async function handleCancel() {
+    if (!window.confirm('Cancel this paper test? Open trades will be closed at current prices.')) return;
+    try {
+      const updated = await apiFetch<PaperTest>(`/api/paper-tests/${paperTestId}/cancel`, { method: 'POST' });
+      setTest(updated);
+    } catch (e) {
+      alert('Failed to cancel: ' + (e as Error).message);
+    }
+  }
+
+  if (loading) return <div className="pt-panel"><div className="pt-loading">Loading paper test…</div></div>;
+  if (error) return <div className="pt-panel"><div className="pt-error">{error}</div></div>;
+  if (!test) return null;
+
+  const trades: PaperTrade[] = test.trades || [];
+  const totalPnl = test.realized_pnl + test.unrealized_pnl;
+
+  return (
+    <div className="pt-panel">
+      <div className="pt-header">
+        <span className="pt-title">Paper Test</span>
+        <span className={`pt-status pt-status-${test.status}`}>{test.status}</span>
+        {test.status === 'running' && (
+          <span className="pt-time-remaining">{fmtTimeRemaining(test.ends_at)}</span>
+        )}
+        <button className="pt-close-btn" onClick={onClose} title="Close">×</button>
+      </div>
+
+      <div className="pt-metrics">
+        <div className="pt-metric">
+          <div className="pt-metric-label">Capital</div>
+          <div className="pt-metric-value">${test.capital_allocated.toLocaleString('en-US')}</div>
+        </div>
+        <div className="pt-metric">
+          <div className="pt-metric-label">Realized P&L</div>
+          <div className={`pt-metric-value ${test.realized_pnl >= 0 ? 'pos' : 'neg'}`}>
+            {fmtPnlSign(test.realized_pnl)}
+          </div>
+        </div>
+        <div className="pt-metric">
+          <div className="pt-metric-label">Unrealized P&L</div>
+          <div className={`pt-metric-value ${test.unrealized_pnl >= 0 ? 'pos' : 'neg'}`}>
+            {fmtPnlSign(test.unrealized_pnl)}
+          </div>
+        </div>
+        <div className="pt-metric">
+          <div className="pt-metric-label">Total P&L</div>
+          <div className={`pt-metric-value ${totalPnl >= 0 ? 'pos' : 'neg'}`}>
+            {fmtPnlSign(totalPnl)}
+          </div>
+        </div>
+      </div>
+
+      {trades.length > 0 && (
+        <div className="pt-trades">
+          <div className="pt-trades-title">Trades</div>
+          <div className="pt-trades-table-wrap">
+            <table className="pt-trades-table">
+              <thead>
+                <tr>
+                  <th>Market</th>
+                  <th>Outcome</th>
+                  <th>Entry</th>
+                  <th>Current/Exit</th>
+                  <th>P&L</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map((t) => {
+                  const currentOrExit = t.exit_price ?? null;
+                  const pnl = t.realized_pnl ?? null;
+                  return (
+                    <tr key={t.id}>
+                      <td className="pt-trade-question" title={t.market_question}>
+                        {t.market_question.length > 60 ? t.market_question.slice(0, 60) + '…' : t.market_question}
+                      </td>
+                      <td>{t.outcome_name}</td>
+                      <td>{(t.entry_price * 100).toFixed(1)}¢</td>
+                      <td>{currentOrExit != null ? (currentOrExit * 100).toFixed(1) + '¢' : '–'}</td>
+                      <td className={pnl != null ? (pnl >= 0 ? 'pos' : 'neg') : ''}>
+                        {pnl != null ? fmtPnlSign(pnl) : '–'}
+                      </td>
+                      <td>{t.status}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {trades.length === 0 && (
+        <div className="pt-no-trades">No trades yet — waiting for entry conditions to be met.</div>
+      )}
+
+      {test.status === 'running' && (
+        <div className="pt-actions">
+          <button className="pt-cancel-btn" onClick={handleCancel}>Cancel test</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface StrategySectionProps {
   addr: string;
   rank: number;
@@ -152,6 +311,9 @@ interface StrategySectionProps {
   historyExpanded: Set<string>;
   onRegen: (addr: string) => void;
   onToggleHistory: (addr: string) => void;
+  activePaperTests: Record<string, string>;
+  onStartPaperTest: (addr: string, strategyId: string, capitalAllocated: number) => void;
+  onClosePaperTestPanel: (addr: string) => void;
 }
 
 function StrategySection({
@@ -167,6 +329,9 @@ function StrategySection({
   historyExpanded,
   onRegen,
   onToggleHistory,
+  activePaperTests,
+  onStartPaperTest,
+  onClosePaperTestPanel,
 }: StrategySectionProps) {
   if (rank > 10) {
     return (
@@ -359,6 +524,40 @@ function StrategySection({
         </div>
       )}
 
+      <div className="da-paper-test-row">
+        {activePaperTests[addr] ? (
+          <button
+            className="da-paper-test-btn da-paper-test-btn-active"
+            onClick={() => onClosePaperTestPanel(addr)}
+          >
+            Hide paper test
+          </button>
+        ) : (
+          <button
+            className="da-paper-test-btn"
+            disabled={!d.paper_test_filter}
+            title={d.paper_test_filter ? 'Start a paper test for this strategy' : 'No paper_test_filter available for this strategy'}
+            onClick={() => {
+              if (!d.paper_test_filter) return;
+              const filter = d.paper_test_filter as Record<string, unknown>;
+              const durationDays = typeof filter.duration_days === 'number' ? filter.duration_days : 7;
+              const msg = `Start a paper test for this strategy?\n\nDuration: ${durationDays} days\nCapital allocated: $10,000`;
+              if (!window.confirm(msg)) return;
+              onStartPaperTest(addr, String(d.id), 10000);
+            }}
+          >
+            Paper test this strategy
+          </button>
+        )}
+      </div>
+
+      {activePaperTests[addr] && (
+        <PaperTestPanel
+          paperTestId={activePaperTests[addr]}
+          onClose={() => onClosePaperTestPanel(addr)}
+        />
+      )}
+
       <button className="da-history-link" onClick={() => onToggleHistory(addr)}>
         {histExp ? 'Hide analysis history' : 'View analysis history'}
       </button>
@@ -426,6 +625,9 @@ export default function Leaderboard() {
   const [stratTabFetched, setStratTabFetched] = useState(false);
   const [stratTypeFilter, setStratTypeFilter] = useState('all');
   const [stratReplFilter, setStratReplFilter] = useState('all');
+
+  // Paper tests: addr -> paper_test_id (for showing panel)
+  const [activePaperTests, setActivePaperTests] = useState<Record<string, string>>({});
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -661,6 +863,34 @@ export default function Leaderboard() {
     }
   }
 
+  // ── Paper test ────────────────────────────────────────────────────────────
+
+  function startPaperTest(addr: string, strategyId: string, capitalAllocated: number) {
+    apiFetch<PaperTest>('/api/paper-tests', {
+      method: 'POST',
+      body: JSON.stringify({
+        wallet_address: addr,
+        strategy_analysis_id: strategyId,
+        capital_allocated: capitalAllocated,
+      }),
+    })
+      .then((pt) => {
+        setActivePaperTests((prev) => ({ ...prev, [addr]: pt.id }));
+        setToastMsg('Paper test started!');
+      })
+      .catch((err) => {
+        setToastMsg('Failed to start paper test: ' + (err as Error).message);
+      });
+  }
+
+  function closePaperTestPanel(addr: string) {
+    setActivePaperTests((prev) => {
+      const next = { ...prev };
+      delete next[addr];
+      return next;
+    });
+  }
+
   // ── Sort ─────────────────────────────────────────────────────────────────
 
   function handleSort(key: string) {
@@ -850,6 +1080,9 @@ export default function Leaderboard() {
                       historyExpanded={historyExpanded}
                       onRegen={startRegen}
                       onToggleHistory={toggleHistory}
+                      activePaperTests={activePaperTests}
+                      onStartPaperTest={startPaperTest}
+                      onClosePaperTestPanel={closePaperTestPanel}
                     />
                   </div>
                 </article>
@@ -1045,6 +1278,9 @@ export default function Leaderboard() {
                           historyExpanded={historyExpanded}
                           onRegen={startRegen}
                           onToggleHistory={toggleHistory}
+                          activePaperTests={activePaperTests}
+                          onStartPaperTest={startPaperTest}
+                          onClosePaperTestPanel={closePaperTestPanel}
                         />
 
                         <div className="detail-actions">
@@ -1094,6 +1330,7 @@ export default function Leaderboard() {
             {currentUser && (
               <>
                 <span>Signed in as {currentUser.email}</span>
+                <a href="/paper-tests">Paper Tests</a>
                 <a href="#" onClick={handleSignOut}>Sign out</a>
               </>
             )}
